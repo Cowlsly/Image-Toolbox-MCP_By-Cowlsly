@@ -1,4 +1,4 @@
-"""MCP server (milestone M2): stdio transport, one read-only tool, ``image_inspect``.
+"""MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert`` (M3).
 
 Tool names use ``snake_case`` rather than the roadmap's ``image.inspect`` because several
 model APIs only accept ``[A-Za-z0-9_-]`` in tool names; dots would break those clients.
@@ -10,7 +10,7 @@ Every path is resolved through :class:`~imagetoolbox_mcp.sandbox.InputRoot`.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -18,7 +18,15 @@ from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .engine import DEFAULT_LIMITS, EngineError, Limits, inspect_image
+from .engine import (
+    DEFAULT_LIMITS,
+    DEFAULT_QUALITY,
+    EngineError,
+    Limits,
+    convert_image,
+    inspect_image,
+)
+from .output import DEFAULT_DIRNAME, MAX_STEM_CHARS, OutputDir, default_stem
 from .sandbox import MAX_PATH_CHARS, InputRoot
 
 log = logging.getLogger("imagetoolbox_mcp")
@@ -28,7 +36,8 @@ SERVER_NAME = "imagetoolbox-mcp"
 INSTRUCTIONS = (
     "Safe, local image tools inspired by Image Toolbox (T8RIN). Paths are relative to the "
     "single input folder the user configured; '..', symlinks and absolute paths outside it "
-    "are refused. Tools never modify original files."
+    "are refused. Tools never modify original files: results are written as new files in "
+    "one output folder and existing files are never overwritten."
 )
 
 
@@ -48,15 +57,50 @@ class InspectResult(BaseModel):
     has_gps_metadata: bool = Field(description="True if the file carries location data.")
 
 
+class ConvertResult(BaseModel):
+    """Output schema of ``image_convert``."""
+
+    source: str = Field(description="Input path relative to the input folder.")
+    output: str = Field(
+        description="New file: relative to the input folder if the output folder is inside "
+        "it (so it can be passed to other tools), otherwise just the file name."
+    )
+    source_format: str | None
+    format: str = Field(description="Output format: JPEG, PNG or WEBP.")
+    width: int
+    height: int
+    mode: str
+    input_bytes: int
+    output_bytes: int
+    metadata_stripped: bool = Field(description="EXIF/XMP/GPS were not copied to the output.")
+    had_gps_metadata: bool = Field(description="The source carried location data.")
+    icc_profile_kept: bool
+    warnings: list[str] = Field(description="Lossy or lossy-looking side effects, if any.")
+
+
 def _tool_error(err: EngineError) -> ToolError:
     # Stable, machine-readable prefix the model (and tests) can match on.
     return ToolError(f"[{err.code}] {err.message}")
 
 
+def _display_output(root: InputRoot, path) -> str:
+    if path.is_relative_to(root.path):
+        return root.display(path)
+    return path.name
+
+
 def build_server(
-    root: InputRoot, limits: Limits = DEFAULT_LIMITS, log_level: str = "WARNING"
+    root: InputRoot,
+    limits: Limits = DEFAULT_LIMITS,
+    log_level: str = "WARNING",
+    out: OutputDir | None = None,
 ) -> MCPServer:
-    """Create a configured server. Separate from ``run`` so tests can connect in-process."""
+    """Create a configured server. Separate from ``run`` so tests can connect in-process.
+
+    ``out`` defaults to ``<root>/imagetoolbox-out`` (ADR-0002).
+    """
+    if out is None:
+        out = OutputDir(root.path / DEFAULT_DIRNAME)
     server = MCPServer(
         log_level=log_level,
         name=SERVER_NAME,
@@ -101,8 +145,67 @@ def build_server(
         log.info("image_inspect ok: %s %sx%s", info["format"], info["width"], info["height"])
         return InspectResult(path=root.display(real), **info)
 
+    @server.tool(
+        name="image_convert",
+        title="Convert image format",
+        description=(
+            "Convert an image to JPEG, PNG or WebP and save it as a NEW file in the output "
+            "folder; the original is never changed and existing files are never overwritten "
+            "(a -1, -2 ... suffix is added). EXIF orientation is applied; EXIF/GPS metadata "
+            "is removed. Transparency is filled with white for JPEG. Converting a JPEG to "
+            "PNG does not restore detail. Animated images: first frame only."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
+    def image_convert(
+        path: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=MAX_PATH_CHARS,
+                description="Source image path relative to the input folder.",
+            ),
+        ],
+        format: Annotated[Literal["jpeg", "png", "webp"], Field(description="Target format.")],
+        quality: Annotated[
+            int,
+            Field(ge=1, le=100, description="JPEG/WebP quality 1-100 (ignored for PNG)."),
+        ] = DEFAULT_QUALITY,
+        lossless: Annotated[bool, Field(description="WebP only: lossless encoding.")] = False,
+        output_name: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_STEM_CHARS,
+                description="Optional file name WITHOUT extension, e.g. 'cat-small'. "
+                "Letters, digits, space, '.', '_' and '-' only. Default: source name.",
+            ),
+        ] = None,
+    ) -> ConvertResult:
+        try:
+            real = root.resolve(path)
+            stem = output_name if output_name is not None else default_stem(real)
+            info = convert_image(
+                real, format, out, stem, quality=quality, lossless=lossless, limits=limits
+            )
+        except EngineError as err:
+            log.info("image_convert refused: %s", err.code)
+            raise _tool_error(err) from None
+        dest = info.pop("output_file")
+        log.info("image_convert ok: %s -> %s", info["source_format"], info["format"])
+        return ConvertResult(source=root.display(real), output=_display_output(root, dest), **info)
+
     return server
 
 
-def run_stdio(root: InputRoot, limits: Limits = DEFAULT_LIMITS, log_level: str = "WARNING") -> None:
-    build_server(root, limits, log_level).run("stdio")
+def run_stdio(
+    root: InputRoot,
+    limits: Limits = DEFAULT_LIMITS,
+    log_level: str = "WARNING",
+    out: OutputDir | None = None,
+) -> None:
+    build_server(root, limits, log_level, out).run("stdio")

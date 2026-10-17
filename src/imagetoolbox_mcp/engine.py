@@ -11,7 +11,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import ExifTags, Image, UnidentifiedImageError
+from PIL import ExifTags, Image, ImageOps, UnidentifiedImageError
 
 # Conservative defaults; callers may lower them, never raise them silently.
 MAX_FILE_BYTES = 64 * 1024 * 1024  # 64 MiB
@@ -98,3 +98,138 @@ def inspect_image(path: str | os.PathLike[str], limits: Limits = DEFAULT_LIMITS)
         raise EngineError("unsupported_format", "The file is not a recognised image.") from None
     except Image.DecompressionBombError:
         raise EngineError("too_many_pixels", "Image exceeds the pixel safety limit.") from None
+
+
+# --- conversion (milestone M3) ------------------------------------------------------------
+
+# Target format -> (Pillow format name, file extension, modes the encoder accepts as-is).
+CONVERT_FORMATS = {
+    "jpeg": ("JPEG", "jpg", ("RGB", "L", "CMYK")),
+    "png": ("PNG", "png", ("1", "L", "LA", "P", "RGB", "RGBA", "I;16")),
+    "webp": ("WEBP", "webp", ("RGB", "RGBA")),
+}
+DEFAULT_QUALITY = 90
+
+
+def _has_alpha(im: Image.Image) -> bool:
+    return im.mode in ("RGBA", "LA", "PA", "La", "RGBa") or "transparency" in im.info
+
+
+def _prepare_pixels(im: Image.Image, target: str, background: tuple[int, int, int]):
+    """Return (image ready for the encoder, warnings)."""
+    warnings: list[str] = []
+    _, _, ok_modes = CONVERT_FORMATS[target]
+    alpha = _has_alpha(im)
+    if target == "jpeg" and alpha:
+        rgba = im.convert("RGBA")
+        flat = Image.new("RGB", rgba.size, background)
+        flat.paste(rgba, mask=rgba.getchannel("A"))
+        warnings.append(
+            "alpha_flattened: JPEG has no transparency; it was filled with the background colour."
+        )
+        return flat, warnings
+    if im.mode in ok_modes and not (im.mode == "P" and target != "png"):
+        return im, warnings
+    if alpha:
+        return im.convert("RGBA"), warnings
+    if im.mode in ("1", "L", "I", "I;16", "F") and target == "jpeg":
+        return im.convert("L") if im.mode in ("1", "L") else im.convert("RGB"), warnings
+    return im.convert("RGB"), warnings
+
+
+def convert_image(
+    src: str | os.PathLike[str],
+    target: str,
+    out,
+    stem: str,
+    *,
+    quality: int = DEFAULT_QUALITY,
+    lossless: bool = False,
+    background: tuple[int, int, int] = (255, 255, 255),
+    limits: Limits = DEFAULT_LIMITS,
+) -> dict:
+    """Convert ``src`` to ``target`` (jpeg/png/webp) as a *new* file in ``out`` (OutputDir).
+
+    EXIF orientation is applied to the pixels; EXIF/XMP/GPS are not copied; the ICC profile
+    is kept. Animated inputs: only the first frame is converted (a warning says so).
+    """
+    if target not in CONVERT_FORMATS:
+        raise EngineError(
+            "unsupported_target", f"Target format must be one of {sorted(CONVERT_FORMATS)}."
+        )
+    if not 1 <= int(quality) <= 100:
+        raise EngineError("invalid_argument", "Quality must be between 1 and 100.")
+    fmt, ext, _ = CONVERT_FORMATS[target]
+    p = Path(src)
+    in_bytes = _check_regular_file(p, limits)
+    warnings: list[str] = []
+    try:
+        with Image.open(p) as im:
+            w, h = im.size
+            if w * h > limits.max_pixels:
+                raise EngineError(
+                    "too_many_pixels", f"Image is {w}x{h}; the pixel limit is {limits.max_pixels}."
+                )
+            src_format = im.format
+            frames = getattr(im, "n_frames", 1)
+            if frames > 1:
+                warnings.append(
+                    f"frames_dropped: input has {frames} frames; only the first was converted."
+                )
+            had_gps = ExifTags.IFD.GPSInfo in im.getexif()
+            icc = im.info.get("icc_profile")
+            im.seek(0)
+            im.load()
+            upright = ImageOps.exif_transpose(im)
+            pixels, more = _prepare_pixels(upright, target, background)
+            warnings.extend(more)
+            # Drop every ancillary chunk (EXIF, XMP, text, comments); some encoders read
+            # them from ``info`` implicitly. Only palette transparency survives.
+            pixels.info = {k: v for k, v in pixels.info.items() if k == "transparency"}
+    except UnidentifiedImageError:
+        raise EngineError("unsupported_format", "The file is not a recognised image.") from None
+    except Image.DecompressionBombError:
+        raise EngineError("too_many_pixels", "Image exceeds the pixel safety limit.") from None
+    except OSError:
+        raise EngineError(
+            "decode_failed", "The image could not be decoded (corrupt or truncated?)."
+        ) from None
+
+    params: dict = {}
+    if icc:
+        params["icc_profile"] = icc
+    if target == "jpeg":
+        params.update(quality=int(quality), optimize=True)
+        if lossless:
+            warnings.append("lossless_ignored: JPEG is always lossy.")
+    elif target == "webp":
+        params.update(quality=int(quality), lossless=bool(lossless), method=4)
+    else:
+        params.update(optimize=True)
+    if src_format == "JPEG" and target in ("png", "webp") and (lossless or target == "png"):
+        warnings.append("no_quality_gain: converting from JPEG cannot restore detail already lost.")
+
+    def _write(fh):
+        try:
+            pixels.save(fh, format=fmt, **params)
+        except (OSError, ValueError) as exc:
+            raise EngineError(
+                "encode_failed", f"Could not encode {fmt}: {type(exc).__name__}."
+            ) from None
+
+    dest = out.write_new(stem, ext, _write)
+    out_bytes = dest.stat().st_size
+    return {
+        "output_file": dest,
+        "source_format": src_format,
+        "format": fmt,
+        "width": pixels.size[0],
+        "height": pixels.size[1],
+        "mode": pixels.mode,
+        "input_bytes": in_bytes,
+        "output_bytes": out_bytes,
+        "metadata_stripped": True,
+        "had_gps_metadata": had_gps,
+        "icc_profile_kept": bool(icc),
+        "warnings": warnings,
+    }
