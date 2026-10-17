@@ -9,12 +9,12 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M0 Foundations | ACTIVE — runtime, packaging, CI workflow, community files done; CI activation BLOCKED (owner must move `ci/ci.yml`); branch rules, secret scanning: owner settings |
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
-| M3 Core operations | NEXT — `image_convert` first |
+| M3 Core operations | ACTIVE — `image_convert` + output policy done (run 4); resize/compress/rotate/crop next |
 | M4–M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR` (or `IMAGETOOLBOX_MCP_ROOT=DIR`). Tool: `image_inspect`.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`. Version 0.2.0.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -30,6 +30,21 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 4 (Claude, scheduled)
+
+**Done (M3 — first write tool)**
+- Oriented: last commit 04:52 UTC (run 3, ~50 min earlier); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4 unchanged); `git push` still denied (blocker 2), so committed via the connector again.
+- `docs/adr/0002-output-policy.md`: one output folder (`--out`/`IMAGETOOLBOX_MCP_OUT`, default `<root>/imagetoolbox-out`, created lazily); flat names, client gives a validated stem only, extension from the format; never overwrite (`O_CREAT|O_EXCL|O_NOFOLLOW` claim, `-1`…`-999` suffixes, then `[name_exhausted]`); atomic content (hidden temp file → fsync → `os.replace` onto the claimed name — chosen because Android shared storage (FUSE) has no hard links); output folder re-checked for symlink swap at write time; EXIF/XMP/GPS dropped, orientation baked in, ICC kept.
+- `src/imagetoolbox_mcp/output.py` (`OutputDir`, `validate_stem`, `default_stem`).
+- `engine.convert_image`: jpeg/png/webp; mode handling (alpha→white for JPEG, P/1/I;16/CMYK); ancillary `info` cleared before encode (Pillow's JPEG encoder otherwise re-emits XMP from `im.info`); warnings `alpha_flattened`, `frames_dropped`, `no_quality_gain`, `lossless_ignored`; `decode_failed`/`encode_failed` codes.
+- `image_convert` MCP tool: enum `format`, `quality` 1–100, `lossless`, optional `output_name`; annotations not-read-only / non-destructive / non-idempotent / closed-world; result path is root-relative (e.g. `imagetoolbox-out/cat.jpg`) so it can be passed to `image_inspect`; host paths never returned.
+- CLI `--out`; version 0.2.0; README, CHANGELOG, roadmap M3 ticks (output policy, convert, format-limits docs; orientation/ICC partial).
+- Roadmap amendment: M6 "strip GPS/EXIF only on explicit request" reversed — outputs are stripped by default (privacy); originals untouched. Reason recorded in roadmap M6.
+
+**Tests:** 62 OK (was 32), also with `-W error::ResourceWarning`: +12 golden convert tests (alpha flattening pixel values, EXIF-6 rotation, GPS/XMP/EXIF byte-level absence, ICC round-trip for all 3 formats, WebP-lossless pixel-exact, palette transparency, quality vs size, 5 mode cases, animated GIF, source unchanged, 6 error codes with nothing written), +12 output-policy tests (incl. 16 concurrent writers get distinct names, planted symlink not written through, output folder swapped for a symlink refused, failed writer leaves nothing), +5 MCP convert tests, +1 CLI test; stdio subprocess test now also converts. Same 62 pass against the wheel installed in a venv. `ruff check`/`ruff format --check` clean. GitHub CI still not run (blocker 4).
+
+**Next action (run 5):** M3 `image_resize` — `width`/`height` (either or both), `fit` = `contain` (default, keep aspect) | `cover` (crop centre) | `exact`; Lanczos default with `nearest`/`bilinear`/`bicubic` options; refuse upscaling beyond source unless `allow_upscale`; output limits (max 16384 px per side, ≤ `MAX_PIXELS`); output format default = source format (fallback PNG), reuse `OutputDir` and the metadata rules; golden tests. Consider extracting the shared "open → orient → strip → save" pipeline from `convert_image` first.
 
 ### 2026-10-17 — run 3 (Claude, scheduled)
 

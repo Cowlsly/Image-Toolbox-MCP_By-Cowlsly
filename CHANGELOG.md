@@ -4,6 +4,13 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-17
+
+### Added
+- `image_convert` tool: JPEG/PNG/WebP with quality and WebP-lossless options; EXIF orientation applied; EXIF/XMP/GPS removed; ICC profile kept; JPEG alpha flattened onto white; animated input → first frame; warnings returned for every lossy-looking side effect.
+- Output policy (ADR-0002, `output.OutputDir`): one output folder (`--out` / `IMAGETOOLBOX_MCP_OUT`, default `<root>/imagetoolbox-out`), flat validated names, never overwrite (`O_EXCL` claim + numbered suffixes), atomic write via temp file + `os.replace`, symlink-swap refusal, cleanup on failure.
+- 30 new tests (62 total): golden pixel/mode/metadata tests, output-policy tests incl. concurrency and planted symlinks, MCP-level convert tests.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

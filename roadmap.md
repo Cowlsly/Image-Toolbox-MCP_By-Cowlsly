@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1 + M2 done, M0 mostly done, M3 next) | Version: 0.4 | Updated: 2026-10-17
+> Status: ACTIVE (M1 + M2 done, M0 mostly done, M3 in progress) | Version: 0.5 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -83,7 +83,7 @@ Compatible AI client
 - [x] Implement MCP initialization, tool listing, invocation and structured errors. (`server.py`; errors are `is_error` results prefixed `[code]`; tests in `tests/integration/test_server.py`)
 - [x] Validate inputs using explicit schemas and conservative size/path limits. (JSON schema with length limits; `sandbox.InputRoot` rejects `..`, symlinks, outside-root paths; engine file-size/pixel limits; `tests/unit/test_sandbox.py`)
 - [x] Implement one end-to-end operation (prefer image metadata or JPEG-to-PNG conversion). (`image_inspect`)
-- [ ] Provide deterministic output paths, safe filename handling and cancellation. **Moved to M3** (2026-10-17): no tool writes output yet; this lands with `image_convert`.
+- [ ] Provide deterministic output paths, safe filename handling and cancellation. **Moved to M3** (2026-10-17): no tool writes output yet; this lands with `image_convert`. (Done in M3 run 4, ADR-0002.)
 - [~] Add structured logging without image bytes or sensitive paths by default. Partial: stderr logs carry only error codes and dimensions, never paths or bytes; not yet JSON-structured.
 - [x] Add integration tests with a compatible MCP inspector/client. (official SDK `Client`, in-process and over a real stdio subprocess; raw JSON-RPC `initialize` with protocol 2025-06-18 also answered)
 **Exit:** independent client discovers and invokes one tool successfully with test fixtures.
@@ -92,13 +92,13 @@ Compatible AI client
 
 ### M3 — Core image operations [P1]
 - [x] `image.inspect`: format, dimensions, orientation and optional safe metadata. (shipped in M2 as `image_inspect`)
-- [ ] Deterministic output paths, safe filename handling, never-overwrite policy and cancellation (moved from M2).
-- [ ] `image.convert`: JPEG/PNG/WebP as supported by tested backend.
+- [x] Deterministic output paths, safe filename handling, never-overwrite policy (ADR-0002, `output.py`, `tests/unit/test_output.py`, run 4). Cancellation deferred to M4 batch jobs: single conversions are bounded by size/pixel limits.
+- [x] `image.convert`: JPEG/PNG/WebP as supported by tested backend. (`image_convert`, golden tests in `tests/unit/test_engine_convert.py`, MCP tests in `tests/integration/test_convert.py`, run 4)
 - [ ] `image.resize`: dimensions, aspect ratio, interpolation and orientation.
 - [ ] `image.compress`: quality controls and before/after byte counts.
 - [ ] `image.rotate_flip` and `image.crop` with explicit coordinates.
-- [ ] Handle EXIF orientation and color profiles consistently.
-- [ ] Document format-specific limits: JPEG has no alpha; converting JPEG to PNG does not restore lost detail or transparency.
+- [~] Handle EXIF orientation and color profiles consistently. Done for `image_convert` (orientation applied to pixels, ICC kept, EXIF/XMP/GPS dropped — tested); repeat for each new operation.
+- [x] Document format-specific limits: JPEG has no alpha; converting JPEG to PNG does not restore lost detail or transparency. (README tool table, tool description, and runtime `warnings` in results)
 **Exit:** golden-image tests, visual comparisons and metadata assertions pass for each declared operation.
 
 ### M4 — Batch processing and workflows [P1]
@@ -124,7 +124,7 @@ Compatible AI client
 - [ ] Enforce allowlisted inputs/outputs or per-operation explicit grants.
 - [ ] Never expose arbitrary filesystem, network, process or shell access as MCP tools.
 - [ ] Require confirmation for destructive, overwrite or sharing operations.
-- [ ] Strip GPS/private EXIF only on explicit request; clearly disclose metadata policy.
+- [ ] Clearly disclose metadata policy. **Amended 2026-10-17 (run 4):** was "strip GPS/private EXIF only on explicit request"; ADR-0002 instead strips EXIF/XMP/GPS from every *new* output by default (originals are untouched), because silently copying location data into files a user may share is the bigger privacy risk. An explicit `keep_metadata` opt-in can be added later if needed.
 - [ ] Use timeouts, resource quotas, parser isolation where possible and dependency patching.
 - [ ] Do not log image content, access tokens or private image metadata.
 - [ ] Document vulnerability reporting, retention and temporary-file cleanup.
@@ -262,9 +262,10 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 3. ~~M0 scaffold: `pyproject.toml`, GitHub Actions CI, CONTRIBUTING/SECURITY/CHANGELOG.~~ Done 2026-10-17 run 2, except CI activation: owner moves `ci/ci.yml` → `.github/workflows/ci.yml` (BLOCKED for the agent).
 4. ~~M2: minimal stdio MCP server exposing `image.inspect` with an allowlisted input root, structured errors, and an MCP client integration test.~~ Done 2026-10-17 run 3 (`image_inspect`).
 5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
-6. **Next:** M3 `image_convert` (JPEG/PNG/WebP) with a separate allowlisted output folder, deterministic never-overwrite output names, and tests. Then client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
-7. Only then Android-specific bridging (M5).
+6. ~~M3 `image_convert` with output folder and never-overwrite names.~~ Done 2026-10-17 run 4 (ADR-0002).
+7. **Next:** M3 `image_resize` (width/height/fit, Lanczos default, never upscale unless asked) reusing `OutputDir`; then `image_compress`, `image_rotate_flip`/`image_crop`. Interleave client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
+8. Only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 3):** M1 and M2 complete: a working stdio MCP server with one read-only tool (`image_inspect`). M0 CI activation still waits on the owner. No write operations, Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 4):** M1 and M2 complete; M3 in progress: `image_inspect` and `image_convert` (JPEG/PNG/WebP, never-overwrite output folder per ADR-0002), 62 tests passing. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
 
 **Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).
