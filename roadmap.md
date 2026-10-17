@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: PLANNING | Version: 0.1 | Updated: 2026-10-16
+> Status: ACTIVE (M1 done, M0/M2 next) | Version: 0.2 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -65,18 +65,19 @@ Compatible AI client
 - [ ] Audit existing README, license, gitignore, branch rules and GitHub App permissions.
 - [ ] Add CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and clear upstream attribution.
 - [ ] Establish issue templates, PR template, changelog and architecture decision records.
-- [ ] Choose implementation language/runtime after confirming host compatibility.
+- [x] Choose implementation language/runtime after confirming host compatibility. — Python 3.10+ / Pillow / official MCP SDK, see ADR-0001 (Termux install: VERIFY).
 - [ ] Configure lint, formatting, unit tests, dependency review and secret scanning.
 - [ ] Document local development and supported operating systems.
 **Exit:** fresh clone installs and passes documented checks on a supported machine.
 
 ### M1 — Upstream capability and license audit [P0]
-- [ ] Map Image Toolbox features to source modules and actual callable boundaries.
-- [ ] Inspect upstream license and transitive dependencies; record obligations.
-- [ ] Determine Android app package, SDK targets, file access mechanisms and exportable interfaces.
-- [ ] Test whether fork changes are needed for a safe invocation surface.
-- [ ] Write a feature feasibility matrix: direct / adapter / fork change / unsupported.
+- [x] Map Image Toolbox features to source modules and actual callable boundaries. — `docs/audit/upstream-audit.md` §3–5.
+- [x] Inspect upstream license and transitive dependencies; record obligations. — Apache-2.0 (T8RIN); obligations in audit §1. `lib/qrose` header: VERIFY (only if reused).
+- [x] Determine Android app package, SDK targets, file access mechanisms and exportable interfaces. — audit §2–3 (static reading; not run on device).
+- [x] Test whether fork changes are needed for a safe invocation surface. — Yes: no headless/parameterised entry point exists (audit §3). Deferred to M5.
+- [x] Write a feature feasibility matrix: direct / adapter / fork change / unsupported. — audit §5.
 **Exit:** signed-off architecture decision with a working minimal processing spike.
+**Status (2026-10-17): COMPLETE** — ADR-0001 accepted; `engine.inspect_image` spike with 11 passing unit tests.
 
 ### M2 — Minimal MCP server [P0]
 - [ ] Implement MCP initialization, tool listing, invocation and structured errors.
@@ -204,11 +205,10 @@ A release must not be described as functional solely because code compiles. Evid
     tool-contracts/
     android/
     clients/
-  src/
-    server/
-    tools/
-    adapters/
-    security/
+  src/imagetoolbox_mcp/
+    engine.py        # Pillow, no MCP imports
+    tools/           # schemas, policy, envelope (planned)
+    server.py        # MCP SDK wiring (planned)
   tests/
     unit/
     integration/
@@ -253,10 +253,14 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 
 ## 11. Immediate next actions
 
-1. Inspect the original Image Toolbox license, architecture and existing Android entry points.
-2. Record the feasibility matrix and choose a backend via ADR-0001.
-3. Select a supported MCP SDK/runtime and create the smallest possible inspect/convert proof of concept.
-4. Add CI and test fixtures before expanding the tool catalog.
-5. Only then implement Android-specific bridging and client setup guides.
+1. ~~Inspect the original Image Toolbox license, architecture and existing Android entry points.~~ Done 2026-10-17 (audit).
+2. ~~Record the feasibility matrix and choose a backend via ADR-0001.~~ Done 2026-10-17.
+3. M0 scaffold: `pyproject.toml`, GitHub Actions CI (ruff + unittest on Python 3.10–3.13), CONTRIBUTING/SECURITY/CHANGELOG.
+4. M2: minimal stdio MCP server exposing `image.inspect` (wrapping `engine.inspect_image`) with an allowlisted input root, structured errors, and an in-process MCP client integration test.
+5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
+6. Then M3 operations (convert first), followed by client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
+7. Only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-16):** Repository initialized; roadmap planning prepared. No MCP server, Android bridge or working image tools are claimed to exist yet.
+**Current checkpoint (2026-10-17):** M1 complete (audit + ADR-0001 + inspect spike). No MCP server, Android bridge or published tools exist yet. Handover: `docs/PROJECT_STATE.md`.
+
+**Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).
