@@ -333,6 +333,18 @@ def default_target_for(source_format: str | None) -> str:
     return _FORMAT_TO_TARGET.get(source_format or "", "png")
 
 
+def _pick_target(loaded: _Loaded, target: str | None) -> str:
+    """``target`` if given, else the source format (PNG + ``format_changed`` warning)."""
+    if target is not None:
+        return target
+    target = default_target_for(loaded.source_format)
+    if CONVERT_FORMATS[target][0] != loaded.source_format:
+        loaded.warnings.append(
+            f"format_changed: {loaded.source_format} output is not supported; saved as PNG."
+        )
+    return target
+
+
 def plan_resize(
     src_size: tuple[int, int],
     width: int | None,
@@ -448,12 +460,7 @@ def resize_image(
             f"The result would be {final[0]}x{final[1]}; the pixel limit is {limits.max_pixels}.",
         )
     loaded.warnings.extend(warnings)
-    if target is None:
-        target = default_target_for(loaded.source_format)
-        if CONVERT_FORMATS[target][0] != loaded.source_format:
-            loaded.warnings.append(
-                f"format_changed: {loaded.source_format} output is not supported; saved as PNG."
-            )
+    target = _pick_target(loaded, target)
     flt = RESAMPLE_FILTERS[resample]
     work = im if scaled == im.size else _resample_ready(im, flt).resize(scaled, flt)
     if im.mode.startswith("I;16") and work.mode == "I":
@@ -546,12 +553,7 @@ def compress_image(
     if stem is not None:
         stem = validate_stem(stem)
     loaded = _load_upright(src, limits)
-    if target is None:
-        target = default_target_for(loaded.source_format)
-        if CONVERT_FORMATS[target][0] != loaded.source_format:
-            loaded.warnings.append(
-                f"format_changed: {loaded.source_format} output is not supported; saved as PNG."
-            )
+    target = _pick_target(loaded, target)
     if colors is not None and target != "png":
         loaded.warnings.append("colors_ignored: palette reduction only applies to PNG.")
     if quality is not None and target == "png":
@@ -632,5 +634,211 @@ def compress_image(
         max_bytes=max_bytes,
         target_met=target_met,
         saved_bytes=loaded.input_bytes - result["output_bytes"],
+    )
+    return result
+
+
+# --- rotate / flip and crop (milestone M3) ------------------------------------------------
+
+ROTATIONS = (0, 90, 180, 270)  # degrees clockwise, as the user sees the upright image
+FLIPS = ("horizontal", "vertical")
+# Clockwise degrees -> Pillow transpose (Pillow's ROTATE_90 is counter-clockwise).
+_ROTATE_OPS = {
+    90: Image.Transpose.ROTATE_270,
+    180: Image.Transpose.ROTATE_180,
+    270: Image.Transpose.ROTATE_90,
+}
+_FLIP_OPS = {
+    "horizontal": Image.Transpose.FLIP_LEFT_RIGHT,
+    "vertical": Image.Transpose.FLIP_TOP_BOTTOM,
+}
+MAX_ASPECT_TERM = 10000
+
+
+def _lossy_note(target: str, lossless: bool) -> str | None:
+    if target == "jpeg" or (target == "webp" and not lossless):
+        return (
+            "lossy_reencode: the result was re-encoded with lossy compression; "
+            "use format 'png' (or lossless WebP) for a pixel-exact copy."
+        )
+    return None
+
+
+def _check_quality(target: str | None, quality: int) -> None:
+    if target is not None:
+        _check_encode_args(target, quality)
+    elif not 1 <= int(quality) <= 100:
+        raise EngineError("invalid_argument", "Quality must be between 1 and 100.")
+
+
+def rotate_flip_image(
+    src: str | os.PathLike[str],
+    out,
+    stem: str | None,
+    *,
+    rotate: int = 0,
+    flip: str | None = None,
+    target: str | None = None,
+    quality: int = DEFAULT_QUALITY,
+    lossless: bool = False,
+    background: tuple[int, int, int] = (255, 255, 255),
+    limits: Limits = DEFAULT_LIMITS,
+) -> dict:
+    """Rotate by 90/180/270 degrees clockwise and/or flip, writing a *new* file in ``out``.
+
+    Directions refer to the upright image (EXIF orientation already applied). Rotation is
+    applied first, then the flip. The pixel moves are exact; only a lossy output format
+    (JPEG, lossy WebP) re-encodes with loss. ``stem`` None means e.g. ``<source>-rot90-flipH``.
+    """
+    from .output import default_stem, validate_stem  # local import: output imports engine
+
+    if rotate not in ROTATIONS:
+        raise EngineError("invalid_argument", f"rotate must be one of {list(ROTATIONS)}.")
+    if flip is not None and flip not in FLIPS:
+        raise EngineError("invalid_argument", f"flip must be one of {list(FLIPS)} or omitted.")
+    if rotate == 0 and flip is None:
+        raise EngineError("invalid_argument", "Nothing to do: give rotate (90/180/270) or flip.")
+    _check_quality(target, quality)
+    if stem is not None:
+        stem = validate_stem(stem)
+    loaded = _load_upright(src, limits)
+    im = loaded.image
+    target = _pick_target(loaded, target)
+    work = im
+    if rotate:
+        work = work.transpose(_ROTATE_OPS[rotate])
+    if flip is not None:
+        work = work.transpose(_FLIP_OPS[flip])
+    note = _lossy_note(target, lossless)
+    if note:
+        loaded.warnings.append(note)
+    if stem is None:
+        parts = []
+        if rotate:
+            parts.append(f"rot{rotate}")
+        if flip is not None:
+            parts.append("flipH" if flip == "horizontal" else "flipV")
+        suffix = "-" + "-".join(parts)
+        stem = default_stem(Path(src))[: 100 - len(suffix)] + suffix
+    result = _encode_new(
+        loaded, work, target, out, stem, quality=quality, lossless=lossless, background=background
+    )
+    result.update(rotate=rotate, flip=flip, source_width=im.size[0], source_height=im.size[1])
+    return result
+
+
+def parse_aspect(aspect: str) -> tuple[int, int]:
+    """Parse ``"W:H"`` (e.g. ``"16:9"``, ``"1:1"``) into two positive integers."""
+    parts = str(aspect).strip().split(":")
+    try:
+        if len(parts) != 2:
+            raise ValueError
+        aw, ah = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise EngineError(
+            "invalid_argument", "aspect must look like 'W:H', e.g. '1:1', '4:3' or '16:9'."
+        ) from None
+    if not (1 <= aw <= MAX_ASPECT_TERM and 1 <= ah <= MAX_ASPECT_TERM):
+        raise EngineError(
+            "invalid_argument", f"aspect terms must be between 1 and {MAX_ASPECT_TERM}."
+        )
+    return aw, ah
+
+
+def plan_crop(
+    size: tuple[int, int],
+    *,
+    left: int | None = None,
+    top: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    aspect: str | None = None,
+) -> tuple[tuple[int, int, int, int], list[str]]:
+    """Pure geometry. Return ((left, top, right, bottom), warnings) in upright pixels.
+
+    Either an explicit box (``width`` and ``height``, plus ``left``/``top`` defaulting to
+    0) that must lie fully inside the image, or ``aspect`` alone for the largest centred
+    box with that ratio. Out-of-bounds boxes are refused, never silently clamped.
+    """
+    sw, sh = size
+    warnings: list[str] = []
+    if aspect is not None:
+        if any(v is not None for v in (left, top, width, height)):
+            raise EngineError(
+                "invalid_argument", "Give either aspect or a box (left/top/width/height), not both."
+            )
+        aw, ah = parse_aspect(aspect)
+        if sw * ah >= sh * aw:  # source is wider than the ratio: keep full height
+            w, h = min(sw, max(1, round(sh * aw / ah))), sh
+        else:
+            w, h = sw, min(sh, max(1, round(sw * ah / aw)))
+        x, y = (sw - w) // 2, (sh - h) // 2
+    else:
+        if width is None or height is None:
+            raise EngineError(
+                "invalid_argument", "Give width and height (and optionally left/top), or aspect."
+            )
+        x, y, w, h = int(left or 0), int(top or 0), int(width), int(height)
+        if x < 0 or y < 0 or w < 1 or h < 1:
+            raise EngineError(
+                "invalid_argument", "left/top must be >= 0 and width/height must be >= 1."
+            )
+        if x + w > sw or y + h > sh:
+            raise EngineError(
+                "crop_out_of_bounds",
+                f"The box (left {x}, top {y}, {w}x{h}) does not fit inside the upright image, "
+                f"which is {sw}x{sh}. Use image_inspect to check the size.",
+            )
+    if (w, h) == (sw, sh):
+        warnings.append("crop_full_image: the box covers the whole image; nothing was removed.")
+    return (x, y, x + w, y + h), warnings
+
+
+def crop_image(
+    src: str | os.PathLike[str],
+    out,
+    stem: str | None,
+    *,
+    left: int | None = None,
+    top: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    aspect: str | None = None,
+    target: str | None = None,
+    quality: int = DEFAULT_QUALITY,
+    lossless: bool = False,
+    background: tuple[int, int, int] = (255, 255, 255),
+    limits: Limits = DEFAULT_LIMITS,
+) -> dict:
+    """Crop a box (or a centred ``aspect`` box) of the upright image into a *new* file.
+
+    ``stem`` None means ``<source name>-crop-<W>x<H>``.
+    """
+    from .output import default_stem, validate_stem  # local import: output imports engine
+
+    box_args = dict(left=left, top=top, width=width, height=height, aspect=aspect)
+    # Validate the arguments before opening anything (a huge canvas accepts any valid box).
+    plan_crop((1 << 30, 1 << 30), **box_args)
+    _check_quality(target, quality)
+    if stem is not None:
+        stem = validate_stem(stem)
+    loaded = _load_upright(src, limits)
+    im = loaded.image
+    box, warnings = plan_crop(im.size, **box_args)
+    loaded.warnings.extend(warnings)
+    target = _pick_target(loaded, target)
+    note = _lossy_note(target, lossless)
+    if note:
+        loaded.warnings.append(note)
+    work = im.crop(box)
+    w, h = box[2] - box[0], box[3] - box[1]
+    if stem is None:
+        suffix = f"-crop-{w}x{h}"
+        stem = default_stem(Path(src))[: 100 - len(suffix)] + suffix
+    result = _encode_new(
+        loaded, work, target, out, stem, quality=quality, lossless=lossless, background=background
+    )
+    result.update(
+        crop_left=box[0], crop_top=box[1], source_width=im.size[0], source_height=im.size[1]
     )
     return result
