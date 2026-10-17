@@ -1,5 +1,6 @@
 """MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert``,
-``image_resize``, ``image_compress``, ``image_rotate_flip`` and ``image_crop`` (M3).
+``image_resize``, ``image_compress``, ``image_rotate_flip`` and ``image_crop`` (M3), and
+``image_batch`` (M4).
 
 Tool names use ``snake_case`` rather than the roadmap's ``image.inspect`` because several
 model APIs only accept ``[A-Za-z0-9_-]`` in tool names; dots would break those clients.
@@ -10,15 +11,29 @@ Every path is resolved through :class:`~imagetoolbox_mcp.sandbox.InputRoot`.
 
 from __future__ import annotations
 
+import functools
 import logging
-from typing import Annotated, Literal
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal
 
-from mcp.server.mcpserver import MCPServer
+import anyio
+import anyio.to_thread
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .batch import (
+    DEFAULT_BATCH_FILES,
+    MAX_BATCH_FILES,
+    MAX_PATTERN_CHARS,
+    parse_options,
+    run_one,
+    select_files,
+    sha256_file,
+    write_batch_manifest,
+)
 from .engine import (
     DEFAULT_LIMITS,
     DEFAULT_QUALITY,
@@ -135,6 +150,65 @@ class CropResult(ResizeResult):
 
     crop_left: int = Field(description="Left edge of the crop box in the upright source.")
     crop_top: int = Field(description="Top edge of the crop box in the upright source.")
+
+
+class BatchItem(BaseModel):
+    """One file of an ``image_batch`` run."""
+
+    source: str = Field(description="Input path relative to the input folder.")
+    status: Literal["ok", "failed", "planned", "not_run"]
+    output: str | None = None
+    input_bytes: int | None = None
+    output_bytes: int | None = None
+    width: int | None = None
+    height: int | None = None
+    format: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    error: str | None = None
+
+
+class SkippedEntry(BaseModel):
+    name: str
+    reason: str
+
+
+class BatchResult(BaseModel):
+    """Output schema of ``image_batch``."""
+
+    operation: str
+    folder: str = Field(description="Folder relative to the input folder ('.' = the root).")
+    pattern: str | None
+    dry_run: bool
+    matched: int = Field(description="Files selected for processing.")
+    succeeded: int
+    failed: int
+    not_run: int = Field(description="Files left untouched because the batch stopped early.")
+    stopped_reason: str | None = Field(description="Why the batch stopped early, if it did.")
+    input_bytes_total: int
+    output_bytes_total: int
+    manifest: str | None = Field(description="JSON manifest written to the output folder.")
+    skipped: list[SkippedEntry] = Field(description="Matching names not processed, and why.")
+    items: list[BatchItem]
+
+
+BATCH_DESCRIPTION = (
+    "Apply ONE operation to every image directly inside a folder (no sub-folders) and save "
+    "each result as a NEW file in the output folder; originals are never changed and "
+    "existing files are never overwritten (a -1, -2 ... suffix is added). Files are "
+    "processed one at a time; a failing file is reported and the rest continue. Use "
+    "dry_run=true first to see which files would be processed. 'options' are the same as "
+    "the single-file tool, without path/output_name: "
+    "convert {format (required: jpeg|png|webp), quality, lossless}; "
+    "resize {width, height, fit, resample, allow_upscale, format, quality}; "
+    "compress {quality | max_bytes, min_quality, colors, format}; "
+    "rotate_flip {rotate (90|180|270, clockwise), flip (horizontal|vertical), format, "
+    "quality, lossless}; "
+    "crop {left, top, width, height | aspect like '1:1', format, quality, lossless}. "
+    "Without 'pattern', .jpg/.jpeg/.png/.webp/.gif/.bmp/.tif/.tiff files are used. A JSON "
+    "manifest (sources, outputs, options, SHA-256 checksums, failures) is written unless "
+    "write_manifest=false. EXIF/GPS metadata is removed from every output."
+)
 
 
 def _tool_error(err: EngineError) -> ToolError:
@@ -561,6 +635,239 @@ def build_server(
         dest = info.pop("output_file")
         log.info("image_crop ok: %sx%s", info["width"], info["height"])
         return CropResult(source=root.display(real), output=_display_output(root, dest), **info)
+
+    @server.tool(
+        name="image_batch",
+        title="Batch process a folder",
+        description=BATCH_DESCRIPTION,
+        annotations=_write_hints,
+    )
+    async def image_batch(
+        operation: Annotated[
+            Literal["convert", "resize", "compress", "rotate_flip", "crop"],
+            Field(description="Which single-image operation to apply to every file."),
+        ],
+        ctx: Context,
+        options: Annotated[
+            dict[str, Any] | None,
+            Field(description="Options for the operation (see the tool description)."),
+        ] = None,
+        folder: Annotated[
+            str,
+            Field(
+                max_length=MAX_PATH_CHARS,
+                description="Folder relative to the input folder, e.g. 'holiday'. "
+                "'.' (default) = the input folder itself.",
+            ),
+        ] = ".",
+        pattern: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_PATTERN_CHARS,
+                description="Optional case-insensitive file-name glob, e.g. '*.jpg' or "
+                "'IMG_2026*'. Names only, no folders.",
+            ),
+        ] = None,
+        max_files: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=MAX_BATCH_FILES,
+                description="Refuse the batch if more files than this match "
+                f"(default {DEFAULT_BATCH_FILES}, hard limit {MAX_BATCH_FILES}).",
+            ),
+        ] = DEFAULT_BATCH_FILES,
+        dry_run: Annotated[
+            bool, Field(description="Only list the files that would be processed.")
+        ] = False,
+        write_manifest: Annotated[
+            bool,
+            Field(
+                description="Write a JSON manifest of the run to the output folder.",
+            ),
+        ] = True,
+    ) -> BatchResult:
+        try:
+            opts = parse_options(operation, options)
+            folder_path = root.resolve_dir(folder)
+            sel = select_files(
+                folder_path,
+                pattern,
+                max_files=max_files,
+                output_dir=out.path,
+                limits=limits,
+            )
+        except EngineError as err:
+            log.info("image_batch refused: %s", err.code)
+            raise _tool_error(err) from None
+
+        folder_display = root.display(folder_path)  # "." for the root itself
+        skipped = [SkippedEntry(**s) for s in sel.skipped]
+        base = dict(
+            operation=operation,
+            folder=folder_display,
+            pattern=pattern,
+            dry_run=dry_run,
+            matched=len(sel.files),
+            skipped=skipped,
+        )
+        if dry_run or not sel.files:
+            items = [
+                BatchItem(source=root.display(p), status="planned", input_bytes=p.stat().st_size)
+                for p in sel.files
+            ]
+            return BatchResult(
+                **base,
+                succeeded=0,
+                failed=0,
+                not_run=0,
+                stopped_reason=None,
+                input_bytes_total=sel.total_bytes,
+                output_bytes_total=0,
+                manifest=None,
+                items=items,
+            )
+
+        started = datetime.now(timezone.utc)
+        items: list[BatchItem] = []
+        records: list[dict] = []
+        stopped: str | None = None
+
+        def process(src):
+            src_hash = sha256_file(src)
+            info = run_one(operation, opts, src, out, limits)
+            info["output_sha256"] = sha256_file(info["output_file"])
+            info["source_sha256"] = src_hash
+            return info
+
+        def record_manifest(status: str):
+            if not write_manifest:
+                return None
+            record = {
+                "status": status,
+                "started_at": started.isoformat(timespec="seconds"),
+                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "operation": operation,
+                "options": opts.model_dump(),
+                "folder": folder_display,
+                "pattern": pattern,
+                "stopped_reason": stopped,
+                "skipped": sel.skipped,
+                "items": records,
+            }
+            try:
+                return write_batch_manifest(out, operation, record)
+            except EngineError as err:
+                log.info("image_batch manifest not written: %s", err.code)
+                return None
+
+        total = len(sel.files)
+        try:
+            for i, src in enumerate(sel.files):
+                rel = root.display(src)
+                try:
+                    info = await anyio.to_thread.run_sync(functools.partial(process, src))
+                except EngineError as err:
+                    items.append(
+                        BatchItem(
+                            source=rel, status="failed", error_code=err.code, error=err.message
+                        )
+                    )
+                    records.append(
+                        {
+                            "source": rel,
+                            "status": "failed",
+                            "error_code": err.code,
+                            "error": err.message,
+                        }
+                    )
+                    if err.code == "invalid_argument":
+                        # Argument problems are the same for every file: stop now.
+                        stopped = "invalid_argument"
+                        if not any(it.status == "ok" for it in items):
+                            raise _tool_error(err) from None
+                        break
+                except Exception as exc:  # noqa: BLE001 - one bad file must not end the batch
+                    log.warning("image_batch internal error: %s", type(exc).__name__)
+                    msg = "Unexpected error while processing this file."
+                    items.append(
+                        BatchItem(
+                            source=rel, status="failed", error_code="internal_error", error=msg
+                        )
+                    )
+                    records.append(
+                        {
+                            "source": rel,
+                            "status": "failed",
+                            "error_code": "internal_error",
+                            "error": msg,
+                        }
+                    )
+                else:
+                    dest = info["output_file"]
+                    shown = _display_output(root, dest)
+                    items.append(
+                        BatchItem(
+                            source=rel,
+                            status="ok",
+                            output=shown,
+                            input_bytes=info["input_bytes"],
+                            output_bytes=info["output_bytes"],
+                            width=info["width"],
+                            height=info["height"],
+                            format=info["format"],
+                            warnings=info["warnings"],
+                        )
+                    )
+                    records.append(
+                        {
+                            "source": rel,
+                            "status": "ok",
+                            "output": shown,
+                            "source_sha256": info["source_sha256"],
+                            "output_sha256": info["output_sha256"],
+                            "input_bytes": info["input_bytes"],
+                            "output_bytes": info["output_bytes"],
+                            "width": info["width"],
+                            "height": info["height"],
+                            "format": info["format"],
+                            "warnings": info["warnings"],
+                        }
+                    )
+                try:
+                    await ctx.report_progress(i + 1, total, f"{i + 1}/{total} files")
+                except Exception:  # noqa: BLE001 - progress is best effort
+                    pass
+        except anyio.get_cancelled_exc_class():
+            # Every finished file is complete (atomic writes); record what was done.
+            stopped = "cancelled"
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(record_manifest, "cancelled")
+            log.info("image_batch cancelled after %s files", len(items))
+            raise
+
+        done = {it.source for it in items}
+        for p in sel.files:
+            rel = root.display(p)
+            if rel not in done:
+                items.append(BatchItem(source=rel, status="not_run"))
+                records.append({"source": rel, "status": "not_run"})
+        status = "stopped" if stopped else "complete"
+        manifest_path = await anyio.to_thread.run_sync(record_manifest, status)
+        ok = [it for it in items if it.status == "ok"]
+        result = BatchResult(
+            **base,
+            succeeded=len(ok),
+            failed=sum(it.status == "failed" for it in items),
+            not_run=sum(it.status == "not_run" for it in items),
+            stopped_reason=stopped,
+            input_bytes_total=sum(it.input_bytes or 0 for it in ok),
+            output_bytes_total=sum(it.output_bytes or 0 for it in ok),
+            manifest=_display_output(root, manifest_path) if manifest_path else None,
+            items=items,
+        )
+        log.info("image_batch %s: %s ok, %s failed", operation, result.succeeded, result.failed)
+        return result
 
     return server
 

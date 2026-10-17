@@ -38,6 +38,21 @@ class InputRoot:
 
     def resolve(self, user_path: str) -> Path:
         """Map a client-supplied path to a real file path inside the root, or raise."""
+        parts = self._parts(user_path)
+        if not parts:
+            raise EngineError("not_a_file", "The path names the input folder, not a file.")
+        return self._walk(parts, want_dir=False)
+
+    def resolve_dir(self, user_path: str) -> Path:
+        """Like :meth:`resolve`, for a folder. ``""`` or ``"."`` means the root itself."""
+        if isinstance(user_path, str) and user_path.strip() in ("", "."):
+            return self.path
+        parts = self._parts(user_path)
+        if not parts:
+            return self.path
+        return self._walk(parts, want_dir=True)
+
+    def _parts(self, user_path: str) -> tuple[str, ...]:
         if not isinstance(user_path, str) or not user_path.strip():
             raise EngineError("invalid_path", "A non-empty path is required.")
         if "\x00" in user_path:
@@ -56,10 +71,10 @@ class InputRoot:
         parts = candidate.parts
         if any(p == ".." for p in parts):
             raise EngineError("outside_root", "Paths may not contain '..'.")
-        parts = tuple(p for p in parts if p not in ("", "."))
-        if not parts:
-            raise EngineError("not_a_file", "The path names the input folder, not a file.")
+        return tuple(p for p in parts if p not in ("", "."))
 
+    def _walk(self, parts: tuple[str, ...], *, want_dir: bool) -> Path:
+        what = "folder" if want_dir else "image file"
         # Walk component by component with lstat so a symlink at any level is caught.
         current = self.path
         for i, part in enumerate(parts):
@@ -67,14 +82,16 @@ class InputRoot:
             try:
                 st = os.lstat(current)
             except FileNotFoundError:
-                raise EngineError("not_found", "The image file does not exist.") from None
+                raise EngineError("not_found", f"The {what} does not exist.") from None
             except PermissionError:
-                raise EngineError("permission_denied", "The file cannot be read.") from None
+                raise EngineError("permission_denied", f"The {what} cannot be read.") from None
             if stat.S_ISLNK(st.st_mode):
                 raise EngineError("symlink_rejected", "Symbolic links are not accepted.")
             is_last = i == len(parts) - 1
-            if not is_last and not stat.S_ISDIR(st.st_mode):
-                raise EngineError("not_found", "The image file does not exist.")
+            if (not is_last or want_dir) and not stat.S_ISDIR(st.st_mode):
+                if is_last:
+                    raise EngineError("not_a_folder", "The path is not a folder.")
+                raise EngineError("not_found", f"The {what} does not exist.")
 
         # Belt and braces: the fully resolved path must still be under the root.
         real = current.resolve(strict=True)
