@@ -1,0 +1,61 @@
+# STAGED WORKFLOW — not active here. GitHub only runs workflows under .github/workflows/.
+# The automated agent cannot write that folder (connector lacks the "workflows" permission).
+# To activate: open this file on github.com, tap Edit (pencil), change the path to
+# .github/workflows/ci.yml, and commit. Then delete this comment block.
+
+name: CI
+
+on:
+  push:
+    branches: [root]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install "ruff==0.16.8"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package
+        run: python -m pip install .
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: Entry point
+        run: imagetoolbox-mcp --version
