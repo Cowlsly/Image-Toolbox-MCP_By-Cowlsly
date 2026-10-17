@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1–M3 done, M0 mostly done, M7 research done, phone check + M4 next) | Version: 0.5 | Updated: 2026-10-17
+> Status: ACTIVE (M1–M4 done, M0 mostly done, M7 research done; phone check + M6 next) | Version: 0.6 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -104,12 +104,14 @@ Compatible AI client
 **Status (2026-10-17, run 7): COMPLETE** — six tools (`image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`), 143 tests passing locally and against the installed wheel. "Visual comparisons" are implemented as exact/tolerance pixel assertions against reference images (no human eyeballing step). GitHub CI has still not run (M0 blocker), so cross-platform results are VERIFY.
 
 ### M4 — Batch processing and workflows [P1]
-- [ ] Support multiple inputs, per-file results, dry-run previews and collision policies.
-- [ ] Bound concurrency, CPU/memory use, file counts and output sizes.
-- [ ] Preserve originals by default; write atomically and recover from partial failures.
-- [ ] Support progress, cancellation, retries and resumable job manifests when feasible.
-- [ ] Produce a manifest of source, output, parameters, checksums and failures.
+- [x] Support multiple inputs, per-file results, dry-run previews and collision policies. (`image_batch`: one folder + optional name glob, per-file `ok`/`failed`/`not_run`, `dry_run`, collision policy = ADR-0002 never-overwrite with numbered names; ADR-0004; `tests/integration/test_batch.py`, run 9)
+- [x] Bound concurrency, CPU/memory use, file counts and output sizes. (Sequential = concurrency 1; `max_files` default 50 / hard cap 200 and 1 GiB total input refuse rather than truncate; 10 000-entry scan cap; per-file 64 MiB / 64 MP / 16384 px limits unchanged; `tests/unit/test_batch.py`, run 9)
+- [x] Preserve originals by default; write atomically and recover from partial failures. (Source SHA-256 unchanged after batches; atomic writes from ADR-0002; a failing file never aborts the batch, argument errors stop it early; run 9)
+- [ ] Support progress, cancellation, retries and resumable job manifests when feasible. **Partial (run 9):** MCP progress after each file and cancellation (finished files kept, `cancelled` manifest) done and tested in-process; over real stdio clients VERIFY. Automatic retries and resume-from-manifest not built (low value for small phone batches; revisit if users ask).
+- [x] Produce a manifest of source, output, parameters, checksums and failures. (`batch-<op>-<UTC>.json` in the output folder; root-relative paths only; checksum match verified in tests; run 9)
 **Exit:** mixed-format batch fixtures complete with no silent data loss.
+
+**Status (2026-10-17, run 9): exit criterion met** — a mixed folder (EXIF-rotated JPEG with GPS, RGBA PNG, WebP, animated GIF, corrupt JPEG, text file, symlink) converts with every file accounted for (4 ok, 1 failed with a code, symlink reported as skipped, text file not matched), originals' checksums unchanged, manifest checksums match the outputs. Only retries/resume remain (deferred, see above).
 
 ### M5 — Android bridge feasibility and implementation [P1, conditional]
 - [ ] Prototype an explicit user-authorized integration in the fork.
@@ -213,6 +215,8 @@ A release must not be described as functional solely because code compiles. Evid
   src/imagetoolbox_mcp/
     engine.py        # Pillow, no MCP imports
     sandbox.py       # allowlisted input root / path policy
+    output.py        # output folder, never-overwrite atomic writes (ADR-0002)
+    batch.py         # batch selection, option validation, manifest (ADR-0004)
     server.py        # MCP SDK wiring (stdio)
     tools/           # per-tool schemas, envelope (planned, once there are several tools)
   tests/
@@ -268,10 +272,13 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 7. ~~M3 `image_resize`.~~ Done 2026-10-17 run 5. ~~`image_compress`~~ Done run 6. ~~`image_rotate_flip` + `image_crop`~~ Done run 7 — **M3 complete**.
 8. ~~M7 client research~~ Done run 8: `docs/clients.md`, ADR-0003 (stdio stays; phone path = agent CLI in Termux; Claude-app remote path deferred until OAuth + M6). Original item: The owner is phone-only, so the server is useless until some MCP client can reach it. Research (with sources) which clients can launch a local stdio server inside Termux, or whether a phone needs Streamable HTTP on `127.0.0.1` / a tunnel for Claude or ChatGPT remote connectors; write `docs/clients.md` and an ADR if a transport change is needed. Then M4 batch.
 9. **Owner check (VERIFY, highest value now):** on the phone, follow `docs/clients.md` Path A (install the server, then Claude Code or Gemini CLI in Termux, run one tool). This is M7's exit evidence and also answers item 5.
-10. **Next agent run (run 9): M4 batch** — `image_batch` over a folder/glob inside the root (one operation + its arguments, max file count, per-file results, partial failure report, never overwrite), since a phone user benefits most from "do this to all photos in a folder".
-11. Then M6 threat model (prerequisite for any remote/HTTP mode), and only then Android-specific bridging (M5).
+10. ~~M4 batch~~ Done run 9: `image_batch` (ADR-0004), 169 tests. Retries/resume deferred.
+11. **Next agent run (run 10): M6 threat model** — write `docs/threat-model.md` (assets, attackers, entry points; path traversal, symlink races, decompression bombs, malformed files, metadata leakage, resource exhaustion, prompt-injected tool arguments), map each threat to the existing control and test, add fuzz-style tests with malformed/truncated files for every format, and close the gaps found (e.g. a per-call time budget). Prerequisite for any remote/HTTP mode.
+12. Then M9 release prep (tagged 0.x release, Termux install notes verified by the owner) and only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 8):** M1, M2 and M3 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop` over stdio, 145 tests passing. M7 research done (ADR-0003, `docs/clients.md`); real-client evidence waits on the owner's phone. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 9):** M1–M4 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch` over stdio, 169 tests passing. M7 research done (ADR-0003, `docs/clients.md`); real-client evidence waits on the owner's phone. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+
+**Roadmap change (2026-10-17, run 9):** after M6, M9 release prep (a tagged 0.x release with phone-verified install notes) is placed before M5, because the owner needs something installable to test on the phone, and M5 (Android bridge) is only worth doing once the local server is proven there.
 
 **Roadmap change (2026-10-17, run 8):** M4 kept before M6, but M6 is now a hard prerequisite for any HTTP/remote transport (ADR-0003), because the only remote client the owner could use (Claude app) needs a publicly reachable server.
 
