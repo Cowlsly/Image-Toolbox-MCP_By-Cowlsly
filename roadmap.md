@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1 done, M0/M2 next) | Version: 0.2 | Updated: 2026-10-17
+> Status: ACTIVE (M1 done, M0 mostly done, M2 next) | Version: 0.3 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -63,10 +63,10 @@ Compatible AI client
 
 ### M0 — Repository foundations [P0]
 - [ ] Audit existing README, license, gitignore, branch rules and GitHub App permissions.
-- [ ] Add CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and clear upstream attribution.
-- [ ] Establish issue templates, PR template, changelog and architecture decision records.
+- [x] Add CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and clear upstream attribution. — 2026-10-17 run 2.
+- [x] Establish issue templates, PR template, changelog and architecture decision records. — `.github/ISSUE_TEMPLATE/`, PR template, CHANGELOG.md, `docs/adr/` (2026-10-17).
 - [x] Choose implementation language/runtime after confirming host compatibility. — Python 3.10+ / Pillow / official MCP SDK, see ADR-0001 (Termux install: VERIFY).
-- [ ] Configure lint, formatting, unit tests, dependency review and secret scanning.
+- [ ] Configure lint, formatting, unit tests, dependency review and secret scanning. — Dependabot committed 2026-10-17; ruff + unittest CI workflow written and staged at `ci/ci.yml` — **BLOCKED**: agent cannot write `.github/workflows/` (owner must move it), then VERIFY first green run; secret scanning/push protection is a repo setting (owner).
 - [ ] Document local development and supported operating systems.
 **Exit:** fresh clone installs and passes documented checks on a supported machine.
 
@@ -255,12 +255,12 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 
 1. ~~Inspect the original Image Toolbox license, architecture and existing Android entry points.~~ Done 2026-10-17 (audit).
 2. ~~Record the feasibility matrix and choose a backend via ADR-0001.~~ Done 2026-10-17.
-3. M0 scaffold: `pyproject.toml`, GitHub Actions CI (ruff + unittest on Python 3.10–3.13), CONTRIBUTING/SECURITY/CHANGELOG.
+3. ~~M0 scaffold: `pyproject.toml`, GitHub Actions CI, CONTRIBUTING/SECURITY/CHANGELOG.~~ Done 2026-10-17 run 2, except CI activation: owner moves `ci/ci.yml` → `.github/workflows/ci.yml` (BLOCKED for the agent).
 4. M2: minimal stdio MCP server exposing `image.inspect` (wrapping `engine.inspect_image`) with an allowlisted input root, structured errors, and an in-process MCP client integration test.
 5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
 6. Then M3 operations (convert first), followed by client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
 7. Only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17):** M1 complete (audit + ADR-0001 + inspect spike). No MCP server, Android bridge or published tools exist yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 2):** M1 complete; M0 scaffold (packaging, CI, community files) committed. No MCP server, Android bridge or published tools exist yet. Handover: `docs/PROJECT_STATE.md`.
 
 **Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).

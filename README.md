@@ -12,13 +12,15 @@ An open-source Model Context Protocol (MCP) integration for Image Toolbox, enabl
 
 Python 3.10+ server, Pillow image engine, official MCP Python SDK over stdio. Rationale: [ADR-0001](docs/adr/0001-processing-backend.md).
 
-## Running the tests
+## Install and test (developers)
 
 ```sh
-PYTHONPATH=src python -m unittest discover -s tests -t .
+python -m pip install -e .                    # Python 3.10+; pulls in pillow and mcp
+python -m unittest discover -s tests -t .
+imagetoolbox-mcp --version
 ```
 
-Needs Python 3.10+ and Pillow (Termux: `pkg install python python-pillow`).
+Termux (Android): `pkg install python python-pillow`, then `pip install mcp` — still being verified, see [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md). More in [CONTRIBUTING.md](CONTRIBUTING.md); security reports: [SECURITY.md](SECURITY.md).
 
 ## Licence
 
