@@ -52,7 +52,14 @@ class InProcessServerTests(_Fixtures):
             tools = (await c.list_tools()).tools
         self.assertEqual(
             sorted(t.name for t in tools),
-            ["image_compress", "image_convert", "image_inspect", "image_resize"],
+            [
+                "image_compress",
+                "image_convert",
+                "image_crop",
+                "image_inspect",
+                "image_resize",
+                "image_rotate_flip",
+            ],
         )
         tool = next(t for t in tools if t.name == "image_inspect")
         self.assertEqual(tool.input_schema["required"], ["path"])
@@ -125,7 +132,15 @@ class StdioSubprocessTests(_Fixtures):
         async with Client(params, read_timeout_seconds=30) as c:
             names = [t.name for t in (await c.list_tools()).tools]
             self.assertEqual(
-                sorted(names), ["image_compress", "image_convert", "image_inspect", "image_resize"]
+                sorted(names),
+                [
+                    "image_compress",
+                    "image_convert",
+                    "image_crop",
+                    "image_inspect",
+                    "image_resize",
+                    "image_rotate_flip",
+                ],
             )
             r = await c.call_tool("image_inspect", {"path": "b.jpg"})
             self.assertFalse(r.is_error, _text(r))
@@ -142,6 +157,12 @@ class StdioSubprocessTests(_Fixtures):
             cp = await c.call_tool("image_compress", {"path": "b.jpg", "quality": 50})
             self.assertFalse(cp.is_error, _text(cp))
             self.assertEqual(cp.structured_content["quality_used"], 50)
+            rf = await c.call_tool("image_rotate_flip", {"path": "b.jpg", "rotate": 90})
+            self.assertFalse(rf.is_error, _text(rf))
+            self.assertEqual(rf.structured_content["output"], "imagetoolbox-out/b-rot90.jpg")
+            cr = await c.call_tool("image_crop", {"path": "holiday/a.png", "aspect": "1:1"})
+            self.assertFalse(cr.is_error, _text(cr))
+            self.assertEqual(cr.structured_content["width"], cr.structured_content["height"])
         self.assertTrue((self.root_dir / "imagetoolbox-out" / "a.webp").is_file())
 
 
