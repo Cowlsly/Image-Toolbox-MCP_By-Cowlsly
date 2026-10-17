@@ -2,7 +2,7 @@
 
 An open-source Model Context Protocol (MCP) integration for Image Toolbox, enabling AI assistants to access image conversion, editing, compression, metadata, and batch-processing workflows. Developed by Cowlsly as an independent integration with attribution to the original project.
 
-> **Status: early development.** A minimal MCP server works with three tools: `image_inspect` (read-only), `image_convert` (JPEG/PNG/WebP) and `image_resize`. See [roadmap.md](roadmap.md) and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+> **Status: early development.** A minimal MCP server works with four tools: `image_inspect` (read-only), `image_convert` (JPEG/PNG/WebP), `image_resize` and `image_compress`. See [roadmap.md](roadmap.md) and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
 
 ## Attribution
 
@@ -19,6 +19,7 @@ You choose **one input folder**; the server can only read images inside it. Path
 | `image_inspect` | Format, width/height, colour mode, alpha, frames, file size, orientation, a safe EXIF subset. GPS is never returned — only whether it is present. |
 | `image_convert` | Convert to `jpeg`, `png` or `webp` (quality 1–100, WebP lossless). Applies EXIF rotation, **removes EXIF/GPS**, keeps the colour profile. Optional `output_name` (no folders, no extension). |
 | `image_resize` | Resize by `width`, `height` or both. `fit`: `contain` (default, keep aspect inside the box), `cover` (fill and centre-crop), `exact` (stretch). `resample`: `lanczos` (default), `bicubic`, `bilinear`, `nearest` (pixel art). Never enlarges unless `allow_upscale`. Keeps the source format (JPEG/PNG/WebP, else PNG) unless `format` is set. Same metadata rules as convert. Default name `<source>-<W>x<H>`. |
+| `image_compress` | Make a file smaller. JPEG/WebP: `quality` (default 80) **or** `max_bytes` — the highest quality in `min_quality`…95 that fits is found by binary search. PNG stays lossless (optimised) unless `colors` (2–256) or `max_bytes` asks for palette reduction (largest of 256/128/…/2 colours that fits). Reports `input_bytes`, `output_bytes`, `saved_bytes`, `quality_used`/`colors_used`, `target_met`; warns `target_not_met` (smallest attempt kept) and `larger_than_source`. Keeps the source format unless `format` is set. Default name `<source>-compressed`. Tip: for photos prefer JPEG/WebP; PNG `max_bytes` on big photos is slow (≈15 s for 6 MP in the cloud test, slower on a phone). |
 
 Format limits: JPEG has no transparency (it is filled with white and a warning is returned); converting a JPEG to PNG/WebP does not bring back detail already lost; animated images are converted from their first frame only.
 

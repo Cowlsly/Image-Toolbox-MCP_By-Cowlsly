@@ -9,12 +9,12 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M0 Foundations | ACTIVE — runtime, packaging, CI workflow, community files done; CI activation BLOCKED (owner must move `ci/ci.yml`); branch rules, secret scanning: owner settings |
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
-| M3 Core operations | ACTIVE — `image_convert` + output policy (run 4), `image_resize` (run 5) done; compress/rotate/crop next |
+| M3 Core operations | ACTIVE — `image_convert` + output policy (run 4), `image_resize` (run 5), `image_compress` (run 6) done; rotate/flip + crop next |
 | M4–M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`. Version 0.3.0.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`. Version 0.4.0.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -30,6 +30,19 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 6 (Claude, scheduled)
+
+**Done (M3 — `image_compress`)**
+- Oriented at 09:43 UTC: last commit 08:54 UTC (run 5, ~49 min earlier, same agent); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4).
+- Refactor: `_encode_new` split into `_encoder_setup` (mode prep + metadata strip + params), `_save`, `_result`; all 93 earlier tests passed unchanged.
+- `engine.compress_image` + MCP tool `image_compress`: JPEG/WebP by `quality` (default 80) or `max_bytes` (binary search for highest quality in `[min_quality=10, 95]`); PNG lossless optimise, `colors` 2–256 palette reduction (RGBA via FASTOCTREE keeps alpha), `max_bytes` walks the ladder 256→128→…→2 and takes the first fit. `CompressResult` adds `quality_used`, `colors_used`, `max_bytes`, `target_met`, `saved_bytes`. Warnings: `target_not_met` (smallest attempt kept), `larger_than_source`, `palette_reduced`, `quality_ignored`, `colors_ignored`, `format_changed`. Default name `<source>-compressed`.
+- Evidence-driven design change: a first version binary-searched PNG palette sizes 2–256; on a 6 MP image it took 32.6 s, and measuring showed PNG size is **not monotonic** in palette size (16 colours → 4-bit packing → 2.26 MB vs 32 colours 1.79 MB), so binary search picked a needlessly small palette. Now: descending ladder, probes encoded without `optimize` (the slow part, ~3× cost), final encode optimised → 13.9 s worst case (noise image), picks 32 colours. JPEG `max_bytes` on the same 6 MP image: 0.4 s.
+- Version 0.4.0; README tool table, CHANGELOG, roadmap M3 tick, pyproject description.
+
+**Tests:** 113 OK (was 93), also with `-W error::ResourceWarning`: +16 golden compress tests, +4 MCP compress tests, stdio subprocess test lists 4 tools and compresses. Same 113 pass against the wheel installed in a venv (`imagetoolbox-mcp --version` → 0.4.0). `ruff check`/`ruff format --check` clean. GitHub CI still not run (blocker 4).
+
+**Next action (run 7):** close M3 with `image_rotate_flip` (90/180/270 + horizontal/vertical flip, lossless pixel moves on the upright image) and `image_crop` (explicit `left/top/width/height` on the upright image, bounds-checked, optional aspect-ratio centre crop), golden tests, then mark M3 exit. After that: M7 client research (which phone MCP client can launch a stdio server in Termux) before M4 batch.
 
 ### 2026-10-17 — run 5 (Claude, scheduled)
 

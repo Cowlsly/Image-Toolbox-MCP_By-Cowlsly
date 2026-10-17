@@ -4,6 +4,15 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
+### Added
+- `image_compress` tool: JPEG/WebP by `quality` (default 80) or `max_bytes` (binary search for the highest quality in `[min_quality, 95]` that fits; `min_quality` default 10); PNG lossless optimisation, optional `colors` palette reduction (alpha kept), and `max_bytes` walking a 256→2 colour ladder (not a binary search: PNG size is not monotonic in palette size). Result adds `quality_used`, `colors_used`, `max_bytes`, `target_met`, `saved_bytes`. Warnings: `target_not_met`, `larger_than_source`, `palette_reduced`, `quality_ignored`, `colors_ignored`, `format_changed`.
+- 20 new tests (113 total): golden compress tests (quality ordering, highest-fitting quality, WebP target, unreachable target, PNG pixel-exact lossless, palette alpha, ladder choice, metadata/orientation, never-overwrite, argument errors) and MCP-level compress tests; stdio test lists and calls 4 tools.
+
+### Changed
+- Engine encode step split into `_encoder_setup` / `_save` / `_result` so compress can encode to memory and search; convert/resize behaviour unchanged (all earlier tests pass unmodified).
+
 ## [0.3.0] - 2026-10-17
 
 ### Added
