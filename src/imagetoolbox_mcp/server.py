@@ -1,5 +1,5 @@
 """MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert``,
-``image_resize`` and ``image_compress`` (M3).
+``image_resize``, ``image_compress``, ``image_rotate_flip`` and ``image_crop`` (M3).
 
 Tool names use ``snake_case`` rather than the roadmap's ``image.inspect`` because several
 model APIs only accept ``[A-Za-z0-9_-]`` in tool names; dots would break those clients.
@@ -22,6 +22,7 @@ from . import __version__
 from .engine import (
     DEFAULT_LIMITS,
     DEFAULT_QUALITY,
+    MAX_ASPECT_TERM,
     MAX_FILE_BYTES,
     MAX_SIDE,
     MIN_TARGET_BYTES,
@@ -29,8 +30,10 @@ from .engine import (
     Limits,
     compress_image,
     convert_image,
+    crop_image,
     inspect_image,
     resize_image,
+    rotate_flip_image,
 )
 from .output import DEFAULT_DIRNAME, MAX_STEM_CHARS, OutputDir, default_stem
 from .sandbox import MAX_PATH_CHARS, InputRoot
@@ -99,6 +102,39 @@ class CompressResult(ConvertResult):
     max_bytes: int | None = Field(description="The requested size limit, if any.")
     target_met: bool | None = Field(description="Whether max_bytes was met (None if not set).")
     saved_bytes: int = Field(description="input_bytes - output_bytes (negative = larger).")
+
+
+# Shared parameter types (module level: annotations are evaluated lazily by name).
+SourcePath = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=MAX_PATH_CHARS,
+        description="Source image path relative to the input folder.",
+    ),
+]
+OutFormat = Annotated[
+    Literal["jpeg", "png", "webp"] | None,
+    Field(description="Output format. Default: same as the source."),
+]
+Quality = Annotated[
+    int, Field(ge=1, le=100, description="JPEG/WebP quality 1-100 (ignored for PNG).")
+]
+Lossless = Annotated[bool, Field(description="WebP only: lossless encoding.")]
+
+
+class RotateFlipResult(ResizeResult):
+    """Output schema of ``image_rotate_flip``."""
+
+    rotate: int = Field(description="Degrees rotated clockwise (0, 90, 180 or 270).")
+    flip: str | None = Field(description="'horizontal', 'vertical' or None.")
+
+
+class CropResult(ResizeResult):
+    """Output schema of ``image_crop``."""
+
+    crop_left: int = Field(description="Left edge of the crop box in the upright source.")
+    crop_top: int = Field(description="Top edge of the crop box in the upright source.")
 
 
 def _tool_error(err: EngineError) -> ToolError:
@@ -387,6 +423,144 @@ def build_server(
         dest = info.pop("output_file")
         log.info("image_compress ok: %s -> %s bytes", info["input_bytes"], info["output_bytes"])
         return CompressResult(source=root.display(real), output=_display_output(root, dest), **info)
+
+    _write_hints = ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    )
+
+    @server.tool(
+        name="image_rotate_flip",
+        title="Rotate or flip image",
+        description=(
+            "Rotate an image by 90, 180 or 270 degrees CLOCKWISE and/or flip it "
+            "(horizontal = mirror left-right, vertical = upside-down mirror) and save it as "
+            "a NEW file in the output folder (original never changed, existing files never "
+            "overwritten). Directions refer to the photo as it is displayed (EXIF "
+            "orientation is applied first). Rotation happens before the flip. Pixel moves "
+            "are exact; JPEG output is re-encoded (use format 'png' for a pixel-exact "
+            "copy). EXIF/GPS metadata is removed. Default name: '<source>-rot90-flipH'."
+        ),
+        annotations=_write_hints,
+    )
+    def image_rotate_flip(
+        path: SourcePath,
+        rotate: Annotated[
+            Literal[0, 90, 180, 270],
+            Field(description="Clockwise rotation in degrees."),
+        ] = 0,
+        flip: Annotated[
+            Literal["horizontal", "vertical"] | None,
+            Field(description="Optional mirror, applied after rotating."),
+        ] = None,
+        format: OutFormat = None,
+        quality: Quality = DEFAULT_QUALITY,
+        lossless: Lossless = False,
+        output_name: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_STEM_CHARS,
+                description="Optional file name WITHOUT extension. Letters, digits, space, "
+                "'.', '_' and '-' only. Default: '<source name>-rot90' etc.",
+            ),
+        ] = None,
+    ) -> RotateFlipResult:
+        try:
+            real = root.resolve(path)
+            info = rotate_flip_image(
+                real,
+                out,
+                output_name,
+                rotate=rotate,
+                flip=flip,
+                target=format,
+                quality=quality,
+                lossless=lossless,
+                limits=limits,
+            )
+        except EngineError as err:
+            log.info("image_rotate_flip refused: %s", err.code)
+            raise _tool_error(err) from None
+        dest = info.pop("output_file")
+        log.info("image_rotate_flip ok: rot %s flip %s", info["rotate"], info["flip"])
+        return RotateFlipResult(
+            source=root.display(real), output=_display_output(root, dest), **info
+        )
+
+    @server.tool(
+        name="image_crop",
+        title="Crop image",
+        description=(
+            "Cut out a rectangle of an image and save it as a NEW file in the output folder "
+            "(original never changed, existing files never overwritten). Either give "
+            "width and height (plus left/top, default 0) in pixels of the image as it is "
+            "displayed (EXIF orientation applied; use image_inspect for the size), or give "
+            "only 'aspect' like '1:1' or '16:9' for the largest centred crop with that "
+            "ratio. Boxes outside the image are refused, not clamped. Output keeps the "
+            "source format (JPEG/PNG/WebP, otherwise PNG) unless 'format' is given. "
+            "EXIF/GPS metadata is removed. Default name: '<source>-crop-<W>x<H>'."
+        ),
+        annotations=_write_hints,
+    )
+    def image_crop(
+        path: SourcePath,
+        left: Annotated[
+            int | None, Field(ge=0, le=MAX_SIDE * 4, description="Left edge (default 0).")
+        ] = None,
+        top: Annotated[
+            int | None, Field(ge=0, le=MAX_SIDE * 4, description="Top edge (default 0).")
+        ] = None,
+        width: Annotated[
+            int | None, Field(ge=1, le=MAX_SIDE * 4, description="Box width in pixels.")
+        ] = None,
+        height: Annotated[
+            int | None, Field(ge=1, le=MAX_SIDE * 4, description="Box height in pixels.")
+        ] = None,
+        aspect: Annotated[
+            str | None,
+            Field(
+                min_length=3,
+                max_length=2 * len(str(MAX_ASPECT_TERM)) + 1,
+                pattern=r"^[0-9]+:[0-9]+$",
+                description="Instead of a box: centred crop with this ratio, e.g. '1:1'.",
+            ),
+        ] = None,
+        format: OutFormat = None,
+        quality: Quality = DEFAULT_QUALITY,
+        lossless: Lossless = False,
+        output_name: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_STEM_CHARS,
+                description="Optional file name WITHOUT extension. Letters, digits, space, "
+                "'.', '_' and '-' only. Default: '<source name>-crop-<W>x<H>'.",
+            ),
+        ] = None,
+    ) -> CropResult:
+        try:
+            real = root.resolve(path)
+            info = crop_image(
+                real,
+                out,
+                output_name,
+                left=left,
+                top=top,
+                width=width,
+                height=height,
+                aspect=aspect,
+                target=format,
+                quality=quality,
+                lossless=lossless,
+                limits=limits,
+            )
+        except EngineError as err:
+            log.info("image_crop refused: %s", err.code)
+            raise _tool_error(err) from None
+        dest = info.pop("output_file")
+        log.info("image_crop ok: %sx%s", info["width"], info["height"])
+        return CropResult(source=root.display(real), output=_display_output(root, dest), **info)
 
     return server
 

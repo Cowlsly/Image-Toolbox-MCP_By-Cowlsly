@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagetoolbox-mcp"
-description = "Local MCP server for safe image inspection, conversion, resizing and compression, inspired by Image Toolbox (T8RIN)."
+description = "Local MCP server for safe image inspection, conversion, resizing, compression, rotation and cropping, inspired by Image Toolbox (T8RIN)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
