@@ -9,12 +9,13 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M0 Foundations | ACTIVE — runtime, packaging, CI workflow, community files done; CI activation BLOCKED (owner must move `ci/ci.yml`); branch rules, secret scanning: owner settings |
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
-| M3 Core operations | ACTIVE — `image_convert` + output policy (run 4), `image_resize` (run 5), `image_compress` (run 6) done; rotate/flip + crop next |
-| M4–M10 | PENDING |
+| M3 Core operations | **COMPLETE** (2026-10-17, run 7) — convert + output policy (run 4), resize (run 5), compress (run 6), rotate/flip + crop (run 7) |
+| M7 Client interoperability | NEXT — phone-client research (run 8) |
+| M4–M6, M8–M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`. Version 0.4.0.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`. Version 0.5.0.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -30,6 +31,21 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 7 (Claude, scheduled)
+
+**Done (M3 closed — `image_rotate_flip` + `image_crop`)**
+- Oriented at 13:43 UTC: last commit 09:57 UTC (run 6, same agent); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4).
+- Small refactor first: `engine._pick_target` (source format or PNG + `format_changed`) replaces two copies in resize/compress; 113 old tests passed unchanged.
+- `engine.rotate_flip_image` + MCP `image_rotate_flip`: `rotate` 0/90/180/270 **clockwise** (Pillow's `ROTATE_90` is counter-clockwise, so mapped explicitly), `flip` horizontal/vertical, rotation before flip; no-op call → `[invalid_argument]`. Exact `transpose` moves keep every mode (P + transparency, I;16, LA/RGBA). Default name `<source>-rot90-flipH`.
+- `engine.plan_crop` (pure geometry) + `engine.crop_image` + MCP `image_crop`: explicit box (`width`/`height`, `left`/`top` default 0) or `aspect` `"W:H"` (largest centred box, min 1 px). Out-of-bounds → `[crop_out_of_bounds]` whose message gives the real upright size (helps the model retry); deliberately **not** clamped. `crop_full_image` warning when nothing is removed. Arguments validated before the file is opened. Default name `<source>-crop-<W>x<H>`.
+- Decision: both tools warn `lossy_reencode` for JPEG/lossy-WebP output, because users expect rotate/crop to be lossless (jpegtran-style); true lossless JPEG transforms would need libjpeg's `jpegtran`, which Pillow does not expose — deferred (M10 candidate, needs a Termux availability check).
+- Shared MCP parameter types (`SourcePath`, `OutFormat`, `Quality`, `Lossless`) moved to module level in `server.py` — the SDK evaluates string annotations by name, so function-local aliases fail (`InvalidSignature`).
+- Version 0.5.0; README tool table, CHANGELOG, pyproject description; roadmap M3 ticked and marked COMPLETE; next action changed to M7 client research (reason in roadmap §11.8).
+
+**Tests:** 143 OK (was 113), also with `-W error::ResourceWarning`: +26 engine tests (pixel mapping vs reference transposes for all 6 rotate/flip combos, rotate-then-flip order, upright-coordinate semantics with EXIF orientation 6, lossless-WebP alpha exactness, P/I;16/LA modes, GPS stripped + ICC kept + source hash unchanged, crop geometry incl. a 168-case aspect sweep, 10 bad aspect strings, errors write nothing incl. symlink), +4 MCP tests; stdio subprocess test lists 6 tools and calls both new ones. Same 143 pass against the wheel installed in a venv (`imagetoolbox-mcp --version` → 0.5.0). `ruff check`/`ruff format --check` clean. GitHub CI still not run (blocker 4).
+
+**Next action (run 8):** M7 — research, with sources, how a phone-only owner can actually use this server: (a) MCP clients that run in Termux and launch stdio servers; (b) whether the Claude/ChatGPT Android apps can only use remote (HTTPS) connectors, which would need Streamable HTTP + auth + a tunnel; (c) recommend one path. Write `docs/clients.md` (+ ADR-0003 if the transport changes). Then M4 batch.
 
 ### 2026-10-17 — run 6 (Claude, scheduled)
 

@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1 + M2 done, M0 mostly done, M3 in progress) | Version: 0.5 | Updated: 2026-10-17
+> Status: ACTIVE (M1–M3 done, M0 mostly done, M7 next) | Version: 0.5 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -96,10 +96,12 @@ Compatible AI client
 - [x] `image.convert`: JPEG/PNG/WebP as supported by tested backend. (`image_convert`, golden tests in `tests/unit/test_engine_convert.py`, MCP tests in `tests/integration/test_convert.py`, run 4)
 - [x] `image.resize`: dimensions, aspect ratio, interpolation and orientation. (`image_resize`, `tests/unit/test_engine_resize.py`, `tests/integration/test_resize.py`, run 5)
 - [x] `image.compress`: quality controls and before/after byte counts. (`image_compress`: quality or `max_bytes` search, PNG palette reduction; `tests/unit/test_engine_compress.py`, `tests/integration/test_compress.py`, run 6)
-- [ ] `image.rotate_flip` and `image.crop` with explicit coordinates.
-- [~] Handle EXIF orientation and color profiles consistently. Done for `image_convert`, `image_resize` and `image_compress` (orientation applied to pixels, ICC kept, EXIF/XMP/GPS dropped — tested); repeat for each new operation.
+- [x] `image.rotate_flip` and `image.crop` with explicit coordinates. (`image_rotate_flip`: 90/180/270 clockwise + horizontal/vertical flip; `image_crop`: explicit box or centred `aspect`, out-of-bounds refused; `tests/unit/test_engine_rotate_crop.py`, `tests/integration/test_rotate_crop.py`, run 7)
+- [x] Handle EXIF orientation and color profiles consistently. All five write tools load through one `_load_upright` path (orientation applied to pixels; coordinates, sizes and directions refer to the upright image) and one encode path (ICC kept, EXIF/XMP/GPS dropped); each has an EXIF-orientation and a metadata test (runs 4–7).
 - [x] Document format-specific limits: JPEG has no alpha; converting JPEG to PNG does not restore lost detail or transparency. (README tool table, tool description, and runtime `warnings` in results)
 **Exit:** golden-image tests, visual comparisons and metadata assertions pass for each declared operation.
+
+**Status (2026-10-17, run 7): COMPLETE** — six tools (`image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`), 143 tests passing locally and against the installed wheel. "Visual comparisons" are implemented as exact/tolerance pixel assertions against reference images (no human eyeballing step). GitHub CI has still not run (M0 blocker), so cross-platform results are VERIFY.
 
 ### M4 — Batch processing and workflows [P1]
 - [ ] Support multiple inputs, per-file results, dry-run previews and collision policies.
@@ -263,9 +265,10 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 4. ~~M2: minimal stdio MCP server exposing `image.inspect` with an allowlisted input root, structured errors, and an MCP client integration test.~~ Done 2026-10-17 run 3 (`image_inspect`).
 5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
 6. ~~M3 `image_convert` with output folder and never-overwrite names.~~ Done 2026-10-17 run 4 (ADR-0002).
-7. ~~M3 `image_resize`.~~ Done 2026-10-17 run 5. ~~`image_compress`~~ Done run 6. **Next:** `image_rotate_flip` + `image_crop` (closes M3). Interleave client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
-8. Only then Android-specific bridging (M5).
+7. ~~M3 `image_resize`.~~ Done 2026-10-17 run 5. ~~`image_compress`~~ Done run 6. ~~`image_rotate_flip` + `image_crop`~~ Done run 7 — **M3 complete**.
+8. **Next (run 8): M7 client research before M4.** The owner is phone-only, so the server is useless until some MCP client can reach it. Research (with sources) which clients can launch a local stdio server inside Termux, or whether a phone needs Streamable HTTP on `127.0.0.1` / a tunnel for Claude or ChatGPT remote connectors; write `docs/clients.md` and an ADR if a transport change is needed. Then M4 batch.
+9. Only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 6):** M1 and M2 complete; M3 in progress: `image_inspect`, `image_convert` (JPEG/PNG/WebP, never-overwrite output folder per ADR-0002), `image_resize` and `image_compress`, 113 tests passing. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 7):** M1, M2 and M3 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop` over stdio, 143 tests passing. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
 
 **Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).
