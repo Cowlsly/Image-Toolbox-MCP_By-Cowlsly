@@ -32,6 +32,16 @@ class CliTests(unittest.TestCase):
             self.assertEqual(main(["--root", os.path.join(d, "nope")]), 2)
         self.assertIn("not an existing directory", err.getvalue())
 
+    def test_bad_output_folder_is_rejected(self):
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(err):
+            afile = os.path.join(d, "file")
+            open(afile, "w").close()
+            self.assertEqual(main(["--root", d, "--out", afile]), 2)
+            self.assertEqual(main(["--root", d, "--out", os.path.join(d, "a", "b")]), 2)
+        self.assertIn("not a directory", err.getvalue())
+        self.assertIn("Parent of the output folder", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

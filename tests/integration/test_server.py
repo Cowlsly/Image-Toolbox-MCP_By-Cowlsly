@@ -50,8 +50,8 @@ class InProcessServerTests(_Fixtures):
     async def test_lists_tool_with_schema_and_read_only_hints(self):
         async with self.client() as c:
             tools = (await c.list_tools()).tools
-        self.assertEqual([t.name for t in tools], ["image_inspect"])
-        tool = tools[0]
+        self.assertEqual(sorted(t.name for t in tools), ["image_convert", "image_inspect"])
+        tool = next(t for t in tools if t.name == "image_inspect")
         self.assertEqual(tool.input_schema["required"], ["path"])
         self.assertEqual(tool.input_schema["properties"]["path"]["type"], "string")
         self.assertTrue(tool.annotations.read_only_hint)
@@ -121,13 +121,17 @@ class StdioSubprocessTests(_Fixtures):
         )
         async with Client(params, read_timeout_seconds=30) as c:
             names = [t.name for t in (await c.list_tools()).tools]
-            self.assertEqual(names, ["image_inspect"])
+            self.assertEqual(sorted(names), ["image_convert", "image_inspect"])
             r = await c.call_tool("image_inspect", {"path": "b.jpg"})
             self.assertFalse(r.is_error, _text(r))
             self.assertEqual(r.structured_content["format"], "JPEG")
             bad = await c.call_tool("image_inspect", {"path": "../outside.png"})
             self.assertTrue(bad.is_error)
             self.assertIn("[outside_root]", _text(bad))
+            conv = await c.call_tool("image_convert", {"path": "holiday/a.png", "format": "webp"})
+            self.assertFalse(conv.is_error, _text(conv))
+            self.assertEqual(conv.structured_content["output"], "imagetoolbox-out/a.webp")
+        self.assertTrue((self.root_dir / "imagetoolbox-out" / "a.webp").is_file())
 
 
 if __name__ == "__main__":
