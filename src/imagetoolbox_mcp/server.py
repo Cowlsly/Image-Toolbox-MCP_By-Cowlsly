@@ -1,4 +1,5 @@
-"""MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert`` (M3).
+"""MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert`` and
+``image_resize`` (M3).
 
 Tool names use ``snake_case`` rather than the roadmap's ``image.inspect`` because several
 model APIs only accept ``[A-Za-z0-9_-]`` in tool names; dots would break those clients.
@@ -21,10 +22,12 @@ from . import __version__
 from .engine import (
     DEFAULT_LIMITS,
     DEFAULT_QUALITY,
+    MAX_SIDE,
     EngineError,
     Limits,
     convert_image,
     inspect_image,
+    resize_image,
 )
 from .output import DEFAULT_DIRNAME, MAX_STEM_CHARS, OutputDir, default_stem
 from .sandbox import MAX_PATH_CHARS, InputRoot
@@ -76,6 +79,13 @@ class ConvertResult(BaseModel):
     had_gps_metadata: bool = Field(description="The source carried location data.")
     icc_profile_kept: bool
     warnings: list[str] = Field(description="Lossy or lossy-looking side effects, if any.")
+
+
+class ResizeResult(ConvertResult):
+    """Output schema of ``image_resize``."""
+
+    source_width: int = Field(description="Source width after applying EXIF orientation.")
+    source_height: int = Field(description="Source height after applying EXIF orientation.")
 
 
 def _tool_error(err: EngineError) -> ToolError:
@@ -198,6 +208,90 @@ def build_server(
         dest = info.pop("output_file")
         log.info("image_convert ok: %s -> %s", info["source_format"], info["format"])
         return ConvertResult(source=root.display(real), output=_display_output(root, dest), **info)
+
+    @server.tool(
+        name="image_resize",
+        title="Resize image",
+        description=(
+            "Resize an image and save it as a NEW file in the output folder (original never "
+            "changed, existing files never overwritten). Give width, height or both, in "
+            "pixels of the upright image. fit='contain' (default) keeps the aspect ratio "
+            "inside the box; 'cover' fills the box and centre-crops; 'exact' stretches. "
+            "Images are not enlarged unless allow_upscale is true. Output keeps the source "
+            "format (JPEG/PNG/WebP, otherwise PNG) unless 'format' is given. EXIF/GPS "
+            "metadata is removed. Default name: '<source>-<W>x<H>'."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
+    def image_resize(
+        path: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=MAX_PATH_CHARS,
+                description="Source image path relative to the input folder.",
+            ),
+        ],
+        width: Annotated[
+            int | None, Field(ge=1, le=MAX_SIDE, description="Target width in pixels.")
+        ] = None,
+        height: Annotated[
+            int | None, Field(ge=1, le=MAX_SIDE, description="Target height in pixels.")
+        ] = None,
+        fit: Annotated[
+            Literal["contain", "cover", "exact"],
+            Field(description="contain = fit inside; cover = fill and crop; exact = stretch."),
+        ] = "contain",
+        resample: Annotated[
+            Literal["lanczos", "bicubic", "bilinear", "nearest"],
+            Field(description="Interpolation filter. 'nearest' suits pixel art."),
+        ] = "lanczos",
+        allow_upscale: Annotated[
+            bool, Field(description="Allow making the image larger than the source.")
+        ] = False,
+        format: Annotated[
+            Literal["jpeg", "png", "webp"] | None,
+            Field(description="Output format. Default: same as the source."),
+        ] = None,
+        quality: Annotated[
+            int,
+            Field(ge=1, le=100, description="JPEG/WebP quality 1-100 (ignored for PNG)."),
+        ] = DEFAULT_QUALITY,
+        output_name: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_STEM_CHARS,
+                description="Optional file name WITHOUT extension. Letters, digits, space, "
+                "'.', '_' and '-' only. Default: '<source name>-<W>x<H>'.",
+            ),
+        ] = None,
+    ) -> ResizeResult:
+        try:
+            real = root.resolve(path)
+            info = resize_image(
+                real,
+                out,
+                output_name,
+                width=width,
+                height=height,
+                fit=fit,
+                resample=resample,
+                allow_upscale=allow_upscale,
+                target=format,
+                quality=quality,
+                limits=limits,
+            )
+        except EngineError as err:
+            log.info("image_resize refused: %s", err.code)
+            raise _tool_error(err) from None
+        dest = info.pop("output_file")
+        log.info("image_resize ok: %sx%s", info["width"], info["height"])
+        return ResizeResult(source=root.display(real), output=_display_output(root, dest), **info)
 
     return server
 
