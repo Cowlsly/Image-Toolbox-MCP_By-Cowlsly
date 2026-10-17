@@ -10,8 +10,9 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
 | M3 Core operations | **COMPLETE** (2026-10-17, run 7) — convert + output policy (run 4), resize (run 5), compress (run 6), rotate/flip + crop (run 7) |
-| M7 Client interoperability | NEXT — phone-client research (run 8) |
-| M4–M6, M8–M10 | PENDING |
+| M7 Client interoperability | ACTIVE — research + ADR-0003 + protocol test done (run 8); real-client evidence = owner's phone (VERIFY) |
+| M4 Batch | NEXT (run 9) |
+| M5, M6, M8–M10 | PENDING (M6 required before any HTTP/remote mode) |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
@@ -27,10 +28,25 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 2. **`git push` from the sandbox is denied** (repo not in the session's authorised git set). Workaround used: commit via the GitHub connector (`push_files`). Works, but each file's full content must be sent — keep commits small. Owner can fix by adding this repo to the scheduled task's sources.
 3. **VERIFY on owner's phone (Termux):** `pkg install python python-pillow` then `pip install mcp`. Unknown whether `pydantic-core`/`cryptography` build cleanly. Fallback plan in ADR-0001.
 4. **BLOCKED → owner:** CI workflow is staged at `ci/ci.yml`. The GitHub connector returns `403 Resource not accessible by integration` for any commit touching `.github/workflows/` (no `workflows` permission), and `git push` is denied. **Owner fix (phone, 1 min):** open `ci/ci.yml` on github.com → Edit → change the file name/path to `.github/workflows/ci.yml` → delete the 4-line comment header → Commit. Then check the Actions tab for a green run (VERIFY: Actions billing/availability still untested).
-5. **Open question (M7):** which MCP client the owner can use from a phone to reach a local stdio server.
+5. **Answered (M7, run 8) → owner VERIFY:** phone path = an agent CLI inside Termux (Claude Code via community installer, or Gemini CLI) launching the stdio server — steps in `docs/clients.md`. Claude Android app needs a public OAuth server (deferred, ADR-0003); ChatGPT MCP connectors are web-only.
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 8 (Claude, scheduled)
+
+**Done (M7 research — phone clients)**
+- Oriented at 14:43 UTC: last commit 13:57 UTC (run 7, same agent, ~46 min); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4).
+- Researched current product support with sources (Anthropic and OpenAI help pages, claude-code-android README, Termux guides) → `docs/clients.md`. Findings: Claude Android app uses only remote connectors added on claude.ai first (Streamable HTTP/SSE, authless or OAuth, called from Anthropic's cloud); ChatGPT full MCP connectors are web-only (Pro read/fetch-only); Claude Code runs in Termux via a community installer and reports stdio MCP works; Gemini CLI runs in Termux via npm with a build workaround.
+- `docs/adr/0003-transports-and-phone-clients.md`: stdio stays the only shipped transport; recommended phone path = agent CLI in Termux; Claude-app remote path deferred until OAuth 2.1 + M6 threat model; authless remote never shipped; ChatGPT not targeted until mobile support.
+- Spike (not committed): the unchanged server ran over SDK Streamable HTTP on 127.0.0.1; an SDK client listed 6 tools and called `image_inspect`; a foreign `Host` header got HTTP 421 (DNS-rebinding protection on by default). A tunnel would need its hostname allowlisted.
+- `tests/integration/test_protocol.py`: raw JSON-RPC over a real stdio subprocess; versions 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25 echoed; unknown version → 2025-11-25. The SDK's `LATEST_PROTOCOL_VERSION` is `2026-07-28`, but a stdio `initialize` with it is answered with 2025-11-25 (newer revision apparently not negotiated via classic initialize in SDK 2.2.0) — noted, not a problem.
+- Found while writing the test: if a client closes stdin right after sending requests, the server shuts down and may drop a queued request (flaky first version of the test). Real clients keep stdin open; test now waits for each reply. Not treated as a bug.
+- Roadmap: M7 item 1 ticked; items 3–4 annotated (evaluated/checked, not done); next actions 8–11 rewritten (owner phone check, then M4 batch, then M6 before any HTTP). README links `docs/clients.md`; CHANGELOG Unreleased.
+
+**Tests:** 145 OK (was 143), three consecutive full runs with `-W error::ResourceWarning`. `ruff check`/`ruff format --check` clean. No phone test possible from the cloud (VERIFY). GitHub CI still not run (blocker 4).
+
+**Next action (run 9):** M4 `image_batch`: apply one existing operation (convert/resize/compress/rotate_flip/crop) to every image matching a relative folder + optional glob inside the root; limits (max files, e.g. 200; total pixel budget), per-file result list, partial failures reported not aborted, never overwrite, no recursion outside root/symlinks; progress notifications if the SDK supports them cheaply. Golden + MCP tests. If the owner has reported Path A results, record them in M7 first.
 
 ### 2026-10-17 — run 7 (Claude, scheduled)
 
