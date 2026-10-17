@@ -9,12 +9,12 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M0 Foundations | ACTIVE — runtime, packaging, CI workflow, community files done; CI activation BLOCKED (owner must move `ci/ci.yml`); branch rules, secret scanning: owner settings |
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
-| M3 Core operations | ACTIVE — `image_convert` + output policy done (run 4); resize/compress/rotate/crop next |
+| M3 Core operations | ACTIVE — `image_convert` + output policy (run 4), `image_resize` (run 5) done; compress/rotate/crop next |
 | M4–M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`. Version 0.2.0.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`. Version 0.3.0.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -30,6 +30,19 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 5 (Claude, scheduled)
+
+**Done (M3 — `image_resize`)**
+- Oriented at 08:43 UTC: last commit 05:55 UTC (run 4); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4); `git push` still denied (blocker 2) → committed via the connector.
+- Refactor first: `engine._load_upright` (size/pixel checks, frame 0, EXIF orientation, GPS/ICC facts) + `engine._encode_new` (mode prep, metadata strip, encode, never-overwrite write). `convert_image` now uses them; all 62 old tests passed unchanged after the refactor.
+- `engine.plan_resize` (pure geometry) + `engine.resize_image`: `contain`/`cover`/`exact`; Lanczos default, plus bicubic/bilinear/nearest; no upscaling unless `allow_upscale` (`contain` keeps size + `upscale_skipped` warning; `cover`/`exact` → `upscale_refused`); max 16384 px per side and the pixel limit on the result; `aspect_changed` warning for stretched `exact`; output format = source (JPEG/PNG/WebP) else PNG with `format_changed` warning; default name `<stem>-<W>x<H>`; output name validated before decoding.
+- Mode handling decided: P/1-bit expanded before filtering (Pillow would otherwise silently use nearest), `nearest` keeps palette; I;16 resampled as I then clamped back to I;16 (PNG stays 16-bit); RGBA relies on Pillow's premultiplied resize (tested: no dark fringes).
+- MCP tool `image_resize` (same annotations as convert; `ResizeResult` adds `source_width/height`). Version 0.3.0; README, CHANGELOG, roadmap M3 tick.
+
+**Tests:** 93 OK (was 62), also with `-W error::ResourceWarning`: +12 geometry tests (incl. exhaustive "contain never overshoots the box" sweep), +14 golden resize tests, +5 MCP resize tests; stdio subprocess test now lists 3 tools and resizes. Same 93 pass against the wheel installed in a venv (`imagetoolbox-mcp --version` → 0.3.0). `ruff check`/`ruff format --check` clean. GitHub CI still not run (blocker 4).
+
+**Next action (run 6):** M3 `image_compress`: re-encode JPEG/WebP (PNG: optimize + optional palette quantize) with either `quality` or `max_bytes` (binary search on quality, report the quality reached and before/after bytes; warn and keep best effort if the target cannot be met; never larger-than-source without a warning). Then `image_rotate_flip` + `image_crop` (explicit pixel box on the upright image) to close M3, then start M7 client research (which phone MCP client can launch a stdio server in Termux).
 
 ### 2026-10-17 — run 4 (Claude, scheduled)
 
@@ -85,4 +98,4 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 **Tests:** `python3 -m unittest` → 11 tests, all OK (0.04 s). `ruff check` + `ruff format --check` → clean. Fork not modified.
 
-**Next action (run 2):** M0 scaffold — `pyproject.toml` (deps `pillow`, `mcp`; console script), `.github/workflows/ci.yml` (ruff + unittest, Python 3.10–3.13, pinned action SHAs), CONTRIBUTING.md, SECURITY.md, CHANGELOG.md. Then run 3: M2 `image.inspect` MCP tool with allowlisted root + in-process client test.
+**Next action (run 2):** M3 scaffold — wait, see below.

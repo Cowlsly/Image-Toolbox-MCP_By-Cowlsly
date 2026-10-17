@@ -94,10 +94,10 @@ Compatible AI client
 - [x] `image.inspect`: format, dimensions, orientation and optional safe metadata. (shipped in M2 as `image_inspect`)
 - [x] Deterministic output paths, safe filename handling, never-overwrite policy (ADR-0002, `output.py`, `tests/unit/test_output.py`, run 4). Cancellation deferred to M4 batch jobs: single conversions are bounded by size/pixel limits.
 - [x] `image.convert`: JPEG/PNG/WebP as supported by tested backend. (`image_convert`, golden tests in `tests/unit/test_engine_convert.py`, MCP tests in `tests/integration/test_convert.py`, run 4)
-- [ ] `image.resize`: dimensions, aspect ratio, interpolation and orientation.
+- [x] `image.resize`: dimensions, aspect ratio, interpolation and orientation. (`image_resize`, `tests/unit/test_engine_resize.py`, `tests/integration/test_resize.py`, run 5)
 - [ ] `image.compress`: quality controls and before/after byte counts.
 - [ ] `image.rotate_flip` and `image.crop` with explicit coordinates.
-- [~] Handle EXIF orientation and color profiles consistently. Done for `image_convert` (orientation applied to pixels, ICC kept, EXIF/XMP/GPS dropped — tested); repeat for each new operation.
+- [~] Handle EXIF orientation and color profiles consistently. Done for `image_convert` and `image_resize` (orientation applied to pixels, ICC kept, EXIF/XMP/GPS dropped — tested); repeat for each new operation.
 - [x] Document format-specific limits: JPEG has no alpha; converting JPEG to PNG does not restore lost detail or transparency. (README tool table, tool description, and runtime `warnings` in results)
 **Exit:** golden-image tests, visual comparisons and metadata assertions pass for each declared operation.
 
@@ -263,9 +263,9 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 4. ~~M2: minimal stdio MCP server exposing `image.inspect` with an allowlisted input root, structured errors, and an MCP client integration test.~~ Done 2026-10-17 run 3 (`image_inspect`).
 5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
 6. ~~M3 `image_convert` with output folder and never-overwrite names.~~ Done 2026-10-17 run 4 (ADR-0002).
-7. **Next:** M3 `image_resize` (width/height/fit, Lanczos default, never upscale unless asked) reusing `OutputDir`; then `image_compress`, `image_rotate_flip`/`image_crop`. Interleave client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
+7. ~~M3 `image_resize`.~~ Done 2026-10-17 run 5. **Next:** `image_compress` (target quality or max bytes, before/after sizes), then `image_rotate_flip`/`image_crop`. Interleave client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
 8. Only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 4):** M1 and M2 complete; M3 in progress: `image_inspect` and `image_convert` (JPEG/PNG/WebP, never-overwrite output folder per ADR-0002), 62 tests passing. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 5):** M1 and M2 complete; M3 in progress: `image_inspect`, `image_convert` (JPEG/PNG/WebP, never-overwrite output folder per ADR-0002) and `image_resize`, 93 tests passing. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
 
 **Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).

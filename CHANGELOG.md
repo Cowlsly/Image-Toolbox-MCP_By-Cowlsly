@@ -4,6 +4,15 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-17
+
+### Added
+- `image_resize` tool: `width`/`height` (1–16384, either or both, measured on the upright image), `fit` = `contain` | `cover` | `exact`, `resample` = `lanczos` | `bicubic` | `bilinear` | `nearest`, `allow_upscale` (default off: `contain` keeps the source size with an `upscale_skipped` warning, `cover`/`exact` return `[upscale_refused]`), optional `format`/`quality`/`output_name`; default name `<source>-<W>x<H>`. Palette and 1-bit images are expanded before filtering; 16-bit greyscale stays 16-bit; alpha is resampled premultiplied (no dark fringes).
+- 31 new tests (93 total): resize geometry, golden pixel tests (centre crop, orientation, alpha edges, nearest edges, 16-bit), metadata stripping, MCP-level resize tests.
+
+### Changed
+- Engine: the shared "open → check limits → first frame → apply orientation → strip metadata → write new file" pipeline is now `_load_upright` + `_encode_new`, used by both convert and resize. The `frames_dropped` warning now says "used" instead of "converted".
+
 ## [0.2.0] - 2026-10-17
 
 ### Added
