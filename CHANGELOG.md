@@ -4,6 +4,17 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-17
+
+### Added
+- `image_rotate_flip` tool: `rotate` 0/90/180/270 degrees clockwise and/or `flip` `horizontal`/`vertical` (rotation first), exact pixel moves on the upright image; all modes kept (palette + transparency, 16-bit, alpha). Result adds `rotate`, `flip`, `source_width/height`. Default name `<source>-rot90-flipH`.
+- `image_crop` tool: explicit box (`width`/`height` + `left`/`top` default 0) or `aspect` `"W:H"` for the largest centred box; out-of-bounds boxes refused with `[crop_out_of_bounds]` naming the real upright size; `crop_full_image` warning when nothing is removed. Result adds `crop_left`, `crop_top`, `source_width/height`. Default name `<source>-crop-<W>x<H>`.
+- `lossy_reencode` warning for rotate/flip and crop when the output is JPEG or lossy WebP.
+- 30 new tests (143 total): golden pixel-mapping tests against reference transposes, rotate-then-flip order, EXIF-oriented sources, mode preservation, crop geometry incl. an aspect sweep, error cases with nothing written, MCP-level tests; stdio test lists and calls 6 tools.
+
+### Changed
+- `_pick_target` helper shared by resize, compress, rotate/flip and crop (behaviour unchanged).
+
 ## [0.4.0] - 2026-10-17
 
 ### Added

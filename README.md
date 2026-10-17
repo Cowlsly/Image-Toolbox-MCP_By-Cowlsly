@@ -2,7 +2,7 @@
 
 An open-source Model Context Protocol (MCP) integration for Image Toolbox, enabling AI assistants to access image conversion, editing, compression, metadata, and batch-processing workflows. Developed by Cowlsly as an independent integration with attribution to the original project.
 
-> **Status: early development.** A minimal MCP server works with four tools: `image_inspect` (read-only), `image_convert` (JPEG/PNG/WebP), `image_resize` and `image_compress`. See [roadmap.md](roadmap.md) and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+> **Status: early development.** A minimal MCP server works with six tools: `image_inspect` (read-only), `image_convert` (JPEG/PNG/WebP), `image_resize`, `image_compress`, `image_rotate_flip` and `image_crop`. See [roadmap.md](roadmap.md) and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
 
 ## Attribution
 
@@ -20,6 +20,8 @@ You choose **one input folder**; the server can only read images inside it. Path
 | `image_convert` | Convert to `jpeg`, `png` or `webp` (quality 1–100, WebP lossless). Applies EXIF rotation, **removes EXIF/GPS**, keeps the colour profile. Optional `output_name` (no folders, no extension). |
 | `image_resize` | Resize by `width`, `height` or both. `fit`: `contain` (default, keep aspect inside the box), `cover` (fill and centre-crop), `exact` (stretch). `resample`: `lanczos` (default), `bicubic`, `bilinear`, `nearest` (pixel art). Never enlarges unless `allow_upscale`. Keeps the source format (JPEG/PNG/WebP, else PNG) unless `format` is set. Same metadata rules as convert. Default name `<source>-<W>x<H>`. |
 | `image_compress` | Make a file smaller. JPEG/WebP: `quality` (default 80) **or** `max_bytes` — the highest quality in `min_quality`…95 that fits is found by binary search. PNG stays lossless (optimised) unless `colors` (2–256) or `max_bytes` asks for palette reduction (largest of 256/128/…/2 colours that fits). Reports `input_bytes`, `output_bytes`, `saved_bytes`, `quality_used`/`colors_used`, `target_met`; warns `target_not_met` (smallest attempt kept) and `larger_than_source`. Keeps the source format unless `format` is set. Default name `<source>-compressed`. Tip: for photos prefer JPEG/WebP; PNG `max_bytes` on big photos is slow (≈15 s for 6 MP in the cloud test, slower on a phone). |
+| `image_rotate_flip` | `rotate` 90/180/270 degrees **clockwise** and/or `flip` `horizontal` (mirror) / `vertical`; rotation happens first. Directions refer to the photo as displayed (EXIF rotation applied first). Pixel moves are exact; JPEG/lossy-WebP output is re-encoded (warning `lossy_reencode` — use `format: png` for an exact copy). Default name `<source>-rot90-flipH`. |
+| `image_crop` | Either a box — `width`, `height`, optional `left`/`top` (default 0) in pixels of the displayed image — or only `aspect` (`"1:1"`, `"16:9"`…) for the largest centred crop. Boxes outside the image are refused with `[crop_out_of_bounds]` and the real size (never silently clamped). Same format/metadata rules as resize. Default name `<source>-crop-<W>x<H>`. |
 
 Format limits: JPEG has no transparency (it is filled with white and a warning is returned); converting a JPEG to PNG/WebP does not bring back detail already lost; animated images are converted from their first frame only.
 
