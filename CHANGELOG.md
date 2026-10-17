@@ -4,7 +4,12 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-17
+
 ### Added
+- `image_batch` tool (M4): one operation (`convert`/`resize`/`compress`/`rotate_flip`/`crop`) over every image directly inside a folder, with optional case-insensitive name `pattern`; options validated once up front (unknown keys refused); sequential processing; per-file `ok`/`failed`/`not_run` results; partial failures never abort (argument errors stop the batch); `dry_run`; `max_files` (default 50, hard cap 200) and a 1 GiB total-input budget that refuse instead of truncating; JSON manifest with SHA-256 checksums in the output folder; MCP progress after each file; cancellation keeps finished files and writes a `cancelled` manifest. ADR-0004.
+- `InputRoot.resolve_dir` (same sandbox rules for folders; new code `not_a_folder`).
+- 24 new tests (169 total): option validation, file selection (symlink/hidden/oversized/no recursion/limits), each operation's default naming, mixed-format folder (EXIF-rotated JPEG with GPS, RGBA PNG, WebP, animated GIF, corrupt JPEG, text file, symlink) with manifest checksum checks, dry run, never-overwrite on repeat, refusals that write nothing, cancellation; stdio test lists 7 tools and runs a batch.
 - `docs/clients.md`: which MCP clients can reach the server from an Android phone (Claude Code / Gemini CLI in Termux over stdio; Claude app needs a remote OAuth server; ChatGPT MCP is web-only), with sources and Termux setup steps (unverified on a phone).
 - ADR-0003: stdio stays the only transport for now; remote HTTP deferred until OAuth and the threat model.
 - `tests/integration/test_protocol.py`: protocol-version negotiation over real stdio (2 tests, 145 total).
