@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imagetoolbox-mcp"
+description = "Local MCP server for safe image inspection and conversion, inspired by Image Toolbox (T8RIN)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Cowlsly" }]
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+# Lower bounds only; tested versions are recorded in docs/PROJECT_STATE.md.
+dependencies = [
+    "pillow>=10.0",
+    "mcp>=2.0,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly"
+Upstream-inspiration = "https://github.com/T8RIN/ImageToolbox"
+
+[project.scripts]
+imagetoolbox-mcp = "imagetoolbox_mcp.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "imagetoolbox_mcp.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
