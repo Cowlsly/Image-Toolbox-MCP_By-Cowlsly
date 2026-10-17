@@ -4,6 +4,11 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Added
+- `docs/clients.md`: which MCP clients can reach the server from an Android phone (Claude Code / Gemini CLI in Termux over stdio; Claude app needs a remote OAuth server; ChatGPT MCP is web-only), with sources and Termux setup steps (unverified on a phone).
+- ADR-0003: stdio stays the only transport for now; remote HTTP deferred until OAuth and the threat model.
+- `tests/integration/test_protocol.py`: protocol-version negotiation over real stdio (2 tests, 145 total).
+
 ## [0.5.0] - 2026-10-17
 
 ### Added

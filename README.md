@@ -32,6 +32,8 @@ imagetoolbox-mcp --root ~/Pictures        # or: IMAGETOOLBOX_MCP_ROOT=~/Pictures
 imagetoolbox-mcp --root ~/Pictures --out ~/Pictures/converted   # optional output folder (or IMAGETOOLBOX_MCP_OUT)
 ```
 
+Using it from an Android phone (Termux + Claude Code or Gemini CLI), and why the Claude/ChatGPT apps can't connect yet: [docs/clients.md](docs/clients.md).
+
 Example client config (`mcpServers` style, used by many desktop clients):
 
 ```json
