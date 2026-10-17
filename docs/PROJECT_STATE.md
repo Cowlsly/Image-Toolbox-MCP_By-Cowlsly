@@ -10,13 +10,14 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
 | M3 Core operations | **COMPLETE** (2026-10-17, run 7) — convert + output policy (run 4), resize (run 5), compress (run 6), rotate/flip + crop (run 7) |
+| M4 Batch | **COMPLETE** (2026-10-17, run 9) — `image_batch`, ADR-0004; retries/resume deferred |
 | M7 Client interoperability | ACTIVE — research + ADR-0003 + protocol test done (run 8); real-client evidence = owner's phone (VERIFY) |
-| M4 Batch | NEXT (run 9) |
-| M5, M6, M8–M10 | PENDING (M6 required before any HTTP/remote mode) |
+| M6 Threat model | NEXT (run 10) — required before any HTTP/remote mode |
+| M5, M8–M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`. Version 0.5.0.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch`. Version 0.6.0.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -32,6 +33,21 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 9 (Claude, scheduled)
+
+**Done (M4 — `image_batch`)**
+- Oriented at 18:43 UTC: last commit 14:54 UTC (run 8, same agent); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4). Owner has not reported phone results yet (M7 VERIFY).
+- `InputRoot.resolve_dir` (sandbox walk shared with `resolve`; `"."`/`""` = root; new code `not_a_folder`). All 145 earlier tests passed unchanged after the refactor.
+- `src/imagetoolbox_mcp/batch.py` (SDK-independent): per-operation pydantic option models (`extra="forbid"`, cross-field rules mirrored from the engine, `output_name` refused); `select_files` (one folder, no recursion, sorted, hidden ignored, symlinks/non-files/oversized skipped and reported, case-insensitive name glob or default image extensions, output folder refused, `max_files` ≤ 200 and 1 GiB total refuse instead of truncate, 10 000-entry scan cap); `run_one`; `write_batch_manifest`.
+- MCP tool `image_batch` (async): files processed one at a time in a worker thread; per-file `ok`/`failed`/`not_run`; `invalid_argument` stops the batch (whole-call error if nothing written yet); unexpected exceptions → `internal_error` for that file only; `dry_run`; MCP progress after each file; on cancel the in-flight file finishes, no new ones start, and a `cancelled` manifest is written (shielded). Manifest `batch-<op>-<UTC>.json` with full options, SHA-256 of sources and outputs, failures; checksums kept out of the tool result to save model context.
+- Decision: `options` is a free-form object in the schema (validated server-side) rather than a `oneOf` union, because Gemini-style clients handle unions poorly. Recorded in ADR-0004.
+- Found while testing: a corrupt `.jpg` reports `unsupported_format` (Pillow cannot identify it), not `decode_failed` — consistent with the single tools, left as is.
+- Version 0.6.0; README tool table, CHANGELOG, pyproject description; roadmap M4 ticked (4 of 5; progress/cancel done, retries/resume deferred), next action = M6.
+
+**Tests:** 169 OK (was 145), three consecutive full runs with `-W error::ResourceWarning`: +2 sandbox folder tests, +14 batch unit tests, +8 MCP batch tests (mixed-format folder with manifest-checksum and originals-unchanged checks, dry run writes nothing, repeat run gets `-1` names, per-file failure continues, 7 refusal cases write nothing, empty match, cancellation after 2 of 6 files). Stdio subprocess test lists 7 tools and runs a batch; protocol test expects 7 tools. Same 169 pass against the wheel installed in a venv (`imagetoolbox-mcp --version` → 0.6.0). `ruff check`/`ruff format --check` clean. GitHub CI still not run (blocker 4). Cancellation over a real stdio client: VERIFY.
+
+**Next action (run 10):** M6 threat model — `docs/threat-model.md` mapping each threat (path traversal, symlink swap races, decompression bombs, malformed/truncated files per format, metadata leakage, resource exhaustion incl. batch, prompt-injected arguments, log leakage) to its control and test; add malformed-file fuzz tests for JPEG/PNG/WebP/GIF/TIFF/BMP; close gaps found (consider a per-call wall-clock budget and `Image.MAX_IMAGE_PIXELS` alignment). If the owner has reported Path A phone results, record them in M7 first.
 
 ### 2026-10-17 — run 8 (Claude, scheduled)
 
