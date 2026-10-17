@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1–M3 done, M0 mostly done, M7 next) | Version: 0.5 | Updated: 2026-10-17
+> Status: ACTIVE (M1–M3 done, M0 mostly done, M7 research done, phone check + M4 next) | Version: 0.5 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -133,10 +133,10 @@ Compatible AI client
 **Exit:** security checklist reviewed, negative tests pass, critical vulnerabilities resolved.
 
 ### M7 — Client interoperability [P1]
-- [ ] Validate MCP protocol version and official SDK support.
+- [x] Validate MCP protocol version and official SDK support. — `tests/integration/test_protocol.py`: 2024-11-05 … 2025-11-25 echoed over real stdio, unknown version answered with a supported one (run 8, SDK 2.2.0).
 - [ ] Test stdio with at least two compatible desktop clients where possible.
-- [ ] Evaluate authenticated HTTP transport only with a real need and proper access controls.
-- [ ] Document ChatGPT and Claude connection steps only after checking current product support.
+- [ ] Evaluate authenticated HTTP transport only with a real need and proper access controls. — Evaluated in [ADR-0003](docs/adr/0003-transports-and-phone-clients.md) (run 8): real need = Claude Android app; SDK Streamable HTTP works on loopback (spike); needs OAuth + tunnel + M6 threat model first. Not built.
+- [ ] Document ChatGPT and Claude connection steps only after checking current product support. — Product support checked with sources in [docs/clients.md](docs/clients.md) (run 8): Claude app = remote OAuth/authless only; ChatGPT MCP = web only. Termux CLI steps written, VERIFY on phone.
 - [ ] Publish copy-pasteable configuration samples with placeholders, not secrets.
 - [ ] Verify tool results, errors, progress and client-specific limitations.
 **Exit:** documented evidence of successful tool calls per advertised client.
@@ -266,9 +266,13 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
 6. ~~M3 `image_convert` with output folder and never-overwrite names.~~ Done 2026-10-17 run 4 (ADR-0002).
 7. ~~M3 `image_resize`.~~ Done 2026-10-17 run 5. ~~`image_compress`~~ Done run 6. ~~`image_rotate_flip` + `image_crop`~~ Done run 7 — **M3 complete**.
-8. **Next (run 8): M7 client research before M4.** The owner is phone-only, so the server is useless until some MCP client can reach it. Research (with sources) which clients can launch a local stdio server inside Termux, or whether a phone needs Streamable HTTP on `127.0.0.1` / a tunnel for Claude or ChatGPT remote connectors; write `docs/clients.md` and an ADR if a transport change is needed. Then M4 batch.
-9. Only then Android-specific bridging (M5).
+8. ~~M7 client research~~ Done run 8: `docs/clients.md`, ADR-0003 (stdio stays; phone path = agent CLI in Termux; Claude-app remote path deferred until OAuth + M6). Original item: The owner is phone-only, so the server is useless until some MCP client can reach it. Research (with sources) which clients can launch a local stdio server inside Termux, or whether a phone needs Streamable HTTP on `127.0.0.1` / a tunnel for Claude or ChatGPT remote connectors; write `docs/clients.md` and an ADR if a transport change is needed. Then M4 batch.
+9. **Owner check (VERIFY, highest value now):** on the phone, follow `docs/clients.md` Path A (install the server, then Claude Code or Gemini CLI in Termux, run one tool). This is M7's exit evidence and also answers item 5.
+10. **Next agent run (run 9): M4 batch** — `image_batch` over a folder/glob inside the root (one operation + its arguments, max file count, per-file results, partial failure report, never overwrite), since a phone user benefits most from "do this to all photos in a folder".
+11. Then M6 threat model (prerequisite for any remote/HTTP mode), and only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 7):** M1, M2 and M3 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop` over stdio, 143 tests passing. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 8):** M1, M2 and M3 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop` over stdio, 145 tests passing. M7 research done (ADR-0003, `docs/clients.md`); real-client evidence waits on the owner's phone. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+
+**Roadmap change (2026-10-17, run 8):** M4 kept before M6, but M6 is now a hard prerequisite for any HTTP/remote transport (ADR-0003), because the only remote client the owner could use (Claude app) needs a publicly reachable server.
 
 **Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).
