@@ -53,6 +53,7 @@ class InProcessServerTests(_Fixtures):
         self.assertEqual(
             sorted(t.name for t in tools),
             [
+                "image_batch",
                 "image_compress",
                 "image_convert",
                 "image_crop",
@@ -134,6 +135,7 @@ class StdioSubprocessTests(_Fixtures):
             self.assertEqual(
                 sorted(names),
                 [
+                    "image_batch",
                     "image_compress",
                     "image_convert",
                     "image_crop",
@@ -163,6 +165,13 @@ class StdioSubprocessTests(_Fixtures):
             cr = await c.call_tool("image_crop", {"path": "holiday/a.png", "aspect": "1:1"})
             self.assertFalse(cr.is_error, _text(cr))
             self.assertEqual(cr.structured_content["width"], cr.structured_content["height"])
+            bt = await c.call_tool(
+                "image_batch",
+                {"operation": "convert", "options": {"format": "png"}, "folder": "holiday"},
+            )
+            self.assertFalse(bt.is_error, _text(bt))
+            self.assertEqual(bt.structured_content["succeeded"], 1)
+            self.assertTrue(bt.structured_content["manifest"].endswith(".json"))
         self.assertTrue((self.root_dir / "imagetoolbox-out" / "a.webp").is_file())
 
 

@@ -82,6 +82,33 @@ class InputRootTests(unittest.TestCase):
     def test_display_is_root_relative(self):
         self.assertEqual(self.root.display(self.root_dir / "sub" / "b.png"), "sub/b.png")
 
+    def test_resolve_dir(self):
+        self.assertEqual(self.root.resolve_dir("."), self.root_dir)
+        self.assertEqual(self.root.resolve_dir(""), self.root_dir)
+        self.assertEqual(self.root.resolve_dir("sub"), self.root_dir / "sub")
+        self.assertEqual(self.root.resolve_dir("sub/"), self.root_dir / "sub")
+        self.assertEqual(self.root.resolve_dir(str(self.root_dir / "sub")), self.root_dir / "sub")
+
+    def test_resolve_dir_refusals(self):
+        os.symlink(self.root_dir / "sub", self.root_dir / "link")
+        os.symlink(self.outside.parent, self.root_dir / "escape")
+        cases = {
+            "../": "outside_root",
+            "sub/../sub": "outside_root",
+            str(self.outside.parent): "outside_root",
+            "link": "symlink_rejected",
+            "escape": "symlink_rejected",
+            "a.png": "not_a_folder",
+            "nope": "not_found",
+            "a.png/x": "not_found",
+            "sub\x00": "invalid_path",
+        }
+        for user_path, code in cases.items():
+            with self.subTest(user_path=user_path):
+                with self.assertRaises(EngineError) as cm:
+                    self.root.resolve_dir(user_path)
+                self.assertEqual(cm.exception.code, code)
+
 
 if __name__ == "__main__":
     unittest.main()

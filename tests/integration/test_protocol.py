@@ -85,12 +85,12 @@ class ProtocolNegotiationTests(unittest.TestCase):
                 init, tools = _exchange(self.root, version)
                 self.assertEqual(init["result"]["protocolVersion"], version)
                 self.assertEqual(init["result"]["serverInfo"]["name"], "imagetoolbox-mcp")
-                self.assertEqual(len(tools["result"]["tools"]), 6)
+                self.assertEqual(len(tools["result"]["tools"]), 7)
 
     def test_unknown_version_gets_a_supported_one(self):
         init, tools = _exchange(self.root, "1999-01-01")
         self.assertIn(init["result"]["protocolVersion"], RELEASED)
-        self.assertEqual(len(tools["result"]["tools"]), 6)
+        self.assertEqual(len(tools["result"]["tools"]), 7)
 
 
 if __name__ == "__main__":
