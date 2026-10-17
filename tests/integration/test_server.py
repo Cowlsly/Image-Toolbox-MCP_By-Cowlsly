@@ -51,7 +51,8 @@ class InProcessServerTests(_Fixtures):
         async with self.client() as c:
             tools = (await c.list_tools()).tools
         self.assertEqual(
-            sorted(t.name for t in tools), ["image_convert", "image_inspect", "image_resize"]
+            sorted(t.name for t in tools),
+            ["image_compress", "image_convert", "image_inspect", "image_resize"],
         )
         tool = next(t for t in tools if t.name == "image_inspect")
         self.assertEqual(tool.input_schema["required"], ["path"])
@@ -123,7 +124,9 @@ class StdioSubprocessTests(_Fixtures):
         )
         async with Client(params, read_timeout_seconds=30) as c:
             names = [t.name for t in (await c.list_tools()).tools]
-            self.assertEqual(sorted(names), ["image_convert", "image_inspect", "image_resize"])
+            self.assertEqual(
+                sorted(names), ["image_compress", "image_convert", "image_inspect", "image_resize"]
+            )
             r = await c.call_tool("image_inspect", {"path": "b.jpg"})
             self.assertFalse(r.is_error, _text(r))
             self.assertEqual(r.structured_content["format"], "JPEG")
@@ -136,6 +139,9 @@ class StdioSubprocessTests(_Fixtures):
             rs = await c.call_tool("image_resize", {"path": "holiday/a.png", "width": 2})
             self.assertFalse(rs.is_error, _text(rs))
             self.assertEqual(rs.structured_content["width"], 2)
+            cp = await c.call_tool("image_compress", {"path": "b.jpg", "quality": 50})
+            self.assertFalse(cp.is_error, _text(cp))
+            self.assertEqual(cp.structured_content["quality_used"], 50)
         self.assertTrue((self.root_dir / "imagetoolbox-out" / "a.webp").is_file())
 
 
