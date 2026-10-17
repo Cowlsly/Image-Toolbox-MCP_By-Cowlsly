@@ -2,10 +2,13 @@
 
 import contextlib
 import io
+import os
+import tempfile
 import unittest
+from unittest import mock
 
 from imagetoolbox_mcp import __version__
-from imagetoolbox_mcp.__main__ import main
+from imagetoolbox_mcp.__main__ import ROOT_ENV, main
 
 
 class CliTests(unittest.TestCase):
@@ -16,11 +19,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         self.assertIn(__version__, out.getvalue())
 
-    def test_no_args_reports_not_implemented(self):
+    def test_root_is_required(self):
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        env = {k: v for k, v in os.environ.items() if k != ROOT_ENV}
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stderr(err):
             self.assertEqual(main([]), 2)
-        self.assertIn("not implemented", err.getvalue())
+        self.assertIn("input folder is required", err.getvalue())
+
+    def test_missing_root_directory_is_rejected(self):
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(err):
+            self.assertEqual(main(["--root", os.path.join(d, "nope")]), 2)
+        self.assertIn("not an existing directory", err.getvalue())
 
 
 if __name__ == "__main__":

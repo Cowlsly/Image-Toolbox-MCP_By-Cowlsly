@@ -1,0 +1,87 @@
+"""Input path policy: every file an MCP client names must live inside one allowlisted root.
+
+The client sends a path *relative to the root* (an absolute path is accepted only if it
+already lies inside the root). We refuse, before touching the file:
+
+* empty paths, NUL bytes and over-long paths;
+* any ``..`` component (even one that would stay inside the root);
+* any symlink anywhere between the root and the file;
+* anything that resolves outside the root.
+
+Error messages never echo the absolute root, so a client cannot learn the host layout.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+from pathlib import Path, PurePath
+
+from .engine import EngineError
+
+MAX_PATH_CHARS = 1024
+
+
+class InputRoot:
+    """A directory the server may read from. Created once at startup."""
+
+    def __init__(self, root: str | os.PathLike[str]):
+        raw = Path(root).expanduser()
+        if not raw.is_absolute():
+            raw = Path.cwd() / raw
+        # The root itself may be reached via a symlink (common in Termux: ~/storage/...);
+        # we resolve it once here and then forbid symlinks *below* it.
+        resolved = raw.resolve(strict=False)
+        if not resolved.is_dir():
+            raise ValueError(f"Input root is not an existing directory: {raw}")
+        self.path = resolved
+
+    def resolve(self, user_path: str) -> Path:
+        """Map a client-supplied path to a real file path inside the root, or raise."""
+        if not isinstance(user_path, str) or not user_path.strip():
+            raise EngineError("invalid_path", "A non-empty path is required.")
+        if "\x00" in user_path:
+            raise EngineError("invalid_path", "The path contains a NUL byte.")
+        if len(user_path) > MAX_PATH_CHARS:
+            raise EngineError("invalid_path", f"The path is longer than {MAX_PATH_CHARS} chars.")
+
+        candidate = PurePath(user_path)
+        if candidate.is_absolute():
+            try:
+                candidate = PurePath(os.path.normpath(candidate)).relative_to(self.path)
+            except ValueError:
+                raise EngineError(
+                    "outside_root", "The path is outside the allowed input folder."
+                ) from None
+        parts = candidate.parts
+        if any(p == ".." for p in parts):
+            raise EngineError("outside_root", "Paths may not contain '..'.")
+        parts = tuple(p for p in parts if p not in ("", "."))
+        if not parts:
+            raise EngineError("not_a_file", "The path names the input folder, not a file.")
+
+        # Walk component by component with lstat so a symlink at any level is caught.
+        current = self.path
+        for i, part in enumerate(parts):
+            current = current / part
+            try:
+                st = os.lstat(current)
+            except FileNotFoundError:
+                raise EngineError("not_found", "The image file does not exist.") from None
+            except PermissionError:
+                raise EngineError("permission_denied", "The file cannot be read.") from None
+            if stat.S_ISLNK(st.st_mode):
+                raise EngineError("symlink_rejected", "Symbolic links are not accepted.")
+            is_last = i == len(parts) - 1
+            if not is_last and not stat.S_ISDIR(st.st_mode):
+                raise EngineError("not_found", "The image file does not exist.")
+
+        # Belt and braces: the fully resolved path must still be under the root.
+        real = current.resolve(strict=True)
+        if not real.is_relative_to(self.path):
+            raise EngineError("outside_root", "The path is outside the allowed input folder.")
+        return real
+
+    def display(self, path: Path) -> str:
+        """Root-relative POSIX form of a path, safe to show to clients and logs."""
+        return path.relative_to(self.path).as_posix()
