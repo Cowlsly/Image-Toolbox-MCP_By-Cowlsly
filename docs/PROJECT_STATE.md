@@ -8,10 +8,13 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | --- | --- |
 | M0 Foundations | ACTIVE — runtime, packaging, CI workflow, community files done; CI activation BLOCKED (owner must move `ci/ci.yml`); branch rules, secret scanning: owner settings |
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
-| M2 Minimal MCP server | PENDING — next |
-| M3–M10 | PENDING |
+| M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
+| M3 Core operations | NEXT — `image_convert` first |
+| M4–M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
+
+**Run:** `imagetoolbox-mcp --root DIR` (or `IMAGETOOLBOX_MCP_ROOT=DIR`). Tool: `image_inspect`.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -27,6 +30,19 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-17 — run 3 (Claude, scheduled)
+
+**Done (M2 — minimal MCP server)**
+- Oriented: last commit 03:49 UTC (run 2, ~55 min earlier); no other agent activity, no clash. `ci/ci.yml` not yet moved by owner (blocker 4 unchanged).
+- `src/imagetoolbox_mcp/sandbox.py` — `InputRoot`: single allowlisted input folder. Rejects empty/NUL/over-long paths, any `..`, symlinks at **every** path component (lstat walk), absolute paths outside the root; final `resolve()` containment check. The root itself may be a symlink (Termux `~/storage/...`). Errors never include the host path.
+- `src/imagetoolbox_mcp/server.py` — `MCPServer` (mcp 2.2) with tool `image_inspect`: typed input schema (`path`, 1–1024 chars), pydantic `InspectResult` output schema (→ `structuredContent`), annotations read-only / non-destructive / idempotent / closed-world. Engine errors → `is_error` result `"[code] message"`. Logs carry codes and dimensions only.
+- CLI: `imagetoolbox-mcp --root DIR [--log-level]`, env `IMAGETOOLBOX_MCP_ROOT`; exits 2 with a clear message if the root is missing. Version → 0.1.0; CHANGELOG, README (usage, client config example), roadmap M2 ticked with evidence.
+- Decision: tool names are `snake_case` (`image_inspect`) because several model APIs reject dots in tool names. Recorded in roadmap M2.
+
+**Tests:** 32 OK (was 13): 11 engine, 3 CLI, 11 sandbox, 7 integration — of which one launches the server as a real **stdio subprocess** and lists/calls the tool via the official SDK client (M2 exit criterion). Same 32 pass against the wheel installed in a venv. Raw JSON-RPC `initialize` (protocol 2025-06-18) + `tools/list` piped into the installed console script answered correctly. `ruff check` / `ruff format --check` clean. GitHub CI still not run (blocker 4).
+
+**Next action (run 4):** M3 `image_convert` — JPEG/PNG/WebP via Pillow; separate allowlisted **output** folder (`--out DIR`, default `<root>/imagetoolbox-out`? decide in an ADR-0002 "output policy"), deterministic names (`<stem>.<fmt>`, then `<stem>-1.<fmt>`… never overwrite), atomic write (temp file + `os.replace` only into a fresh name), EXIF/GPS stripped by default, orientation applied, pixel/size limits, tests incl. no-overwrite and symlinked-output refusal. Check whether the owner moved the CI workflow.
 
 ### 2026-10-17 — run 2 (Claude, scheduled)
 

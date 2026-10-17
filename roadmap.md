@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1 done, M0 mostly done, M2 next) | Version: 0.3 | Updated: 2026-10-17
+> Status: ACTIVE (M1 + M2 done, M0 mostly done, M3 next) | Version: 0.4 | Updated: 2026-10-17
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -80,16 +80,19 @@ Compatible AI client
 **Status (2026-10-17): COMPLETE** — ADR-0001 accepted; `engine.inspect_image` spike with 11 passing unit tests.
 
 ### M2 — Minimal MCP server [P0]
-- [ ] Implement MCP initialization, tool listing, invocation and structured errors.
-- [ ] Validate inputs using explicit schemas and conservative size/path limits.
-- [ ] Implement one end-to-end operation (prefer image metadata or JPEG-to-PNG conversion).
-- [ ] Provide deterministic output paths, safe filename handling and cancellation.
-- [ ] Add structured logging without image bytes or sensitive paths by default.
-- [ ] Add integration tests with a compatible MCP inspector/client.
+- [x] Implement MCP initialization, tool listing, invocation and structured errors. (`server.py`; errors are `is_error` results prefixed `[code]`; tests in `tests/integration/test_server.py`)
+- [x] Validate inputs using explicit schemas and conservative size/path limits. (JSON schema with length limits; `sandbox.InputRoot` rejects `..`, symlinks, outside-root paths; engine file-size/pixel limits; `tests/unit/test_sandbox.py`)
+- [x] Implement one end-to-end operation (prefer image metadata or JPEG-to-PNG conversion). (`image_inspect`)
+- [ ] Provide deterministic output paths, safe filename handling and cancellation. **Moved to M3** (2026-10-17): no tool writes output yet; this lands with `image_convert`.
+- [~] Add structured logging without image bytes or sensitive paths by default. Partial: stderr logs carry only error codes and dimensions, never paths or bytes; not yet JSON-structured.
+- [x] Add integration tests with a compatible MCP inspector/client. (official SDK `Client`, in-process and over a real stdio subprocess; raw JSON-RPC `initialize` with protocol 2025-06-18 also answered)
 **Exit:** independent client discovers and invokes one tool successfully with test fixtures.
 
+**Status (2026-10-17, run 3): COMPLETE** — exit criterion demonstrated by `StdioSubprocessTests.test_stdio_end_to_end` (32 tests passing). Tool names are `snake_case` (`image_inspect`, not `image.inspect`): several model APIs only accept `[A-Za-z0-9_-]` in tool names, so dots would break those clients. The section 5 table keeps the dotted names as concept labels.
+
 ### M3 — Core image operations [P1]
-- [ ] `image.inspect`: format, dimensions, orientation and optional safe metadata.
+- [x] `image.inspect`: format, dimensions, orientation and optional safe metadata. (shipped in M2 as `image_inspect`)
+- [ ] Deterministic output paths, safe filename handling, never-overwrite policy and cancellation (moved from M2).
 - [ ] `image.convert`: JPEG/PNG/WebP as supported by tested backend.
 - [ ] `image.resize`: dimensions, aspect ratio, interpolation and orientation.
 - [ ] `image.compress`: quality controls and before/after byte counts.
@@ -207,8 +210,9 @@ A release must not be described as functional solely because code compiles. Evid
     clients/
   src/imagetoolbox_mcp/
     engine.py        # Pillow, no MCP imports
-    tools/           # schemas, policy, envelope (planned)
-    server.py        # MCP SDK wiring (planned)
+    sandbox.py       # allowlisted input root / path policy
+    server.py        # MCP SDK wiring (stdio)
+    tools/           # per-tool schemas, envelope (planned, once there are several tools)
   tests/
     unit/
     integration/
@@ -256,11 +260,11 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 1. ~~Inspect the original Image Toolbox license, architecture and existing Android entry points.~~ Done 2026-10-17 (audit).
 2. ~~Record the feasibility matrix and choose a backend via ADR-0001.~~ Done 2026-10-17.
 3. ~~M0 scaffold: `pyproject.toml`, GitHub Actions CI, CONTRIBUTING/SECURITY/CHANGELOG.~~ Done 2026-10-17 run 2, except CI activation: owner moves `ci/ci.yml` → `.github/workflows/ci.yml` (BLOCKED for the agent).
-4. M2: minimal stdio MCP server exposing `image.inspect` (wrapping `engine.inspect_image`) with an allowlisted input root, structured errors, and an in-process MCP client integration test.
+4. ~~M2: minimal stdio MCP server exposing `image.inspect` with an allowlisted input root, structured errors, and an MCP client integration test.~~ Done 2026-10-17 run 3 (`image_inspect`).
 5. Owner check (VERIFY): install `python`, `python-pillow` and `mcp` in Termux on the phone and report whether `pip install mcp` succeeds (pydantic-core/cryptography).
-6. Then M3 operations (convert first), followed by client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
+6. **Next:** M3 `image_convert` (JPEG/PNG/WebP) with a separate allowlisted output folder, deterministic never-overwrite output names, and tests. Then client setup research (M7) — a phone-only setup needs an MCP client that can reach the server.
 7. Only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 2):** M1 complete; M0 scaffold (packaging, CI, community files) committed. No MCP server, Android bridge or published tools exist yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-17, run 3):** M1 and M2 complete: a working stdio MCP server with one read-only tool (`image_inspect`). M0 CI activation still waits on the owner. No write operations, Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
 
 **Roadmap change (2026-10-17):** M1 was done before M0's remaining items because the runtime choice (M0) depended on the audit. Section 7 layout adjusted to Python (`src/imagetoolbox_mcp/`).
