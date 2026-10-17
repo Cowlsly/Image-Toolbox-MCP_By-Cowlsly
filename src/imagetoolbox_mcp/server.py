@@ -1,5 +1,5 @@
-"""MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert`` and
-``image_resize`` (M3).
+"""MCP server: stdio transport. Tools: ``image_inspect`` (M2, read-only), ``image_convert``,
+``image_resize`` and ``image_compress`` (M3).
 
 Tool names use ``snake_case`` rather than the roadmap's ``image.inspect`` because several
 model APIs only accept ``[A-Za-z0-9_-]`` in tool names; dots would break those clients.
@@ -22,9 +22,12 @@ from . import __version__
 from .engine import (
     DEFAULT_LIMITS,
     DEFAULT_QUALITY,
+    MAX_FILE_BYTES,
     MAX_SIDE,
+    MIN_TARGET_BYTES,
     EngineError,
     Limits,
+    compress_image,
     convert_image,
     inspect_image,
     resize_image,
@@ -86,6 +89,16 @@ class ResizeResult(ConvertResult):
 
     source_width: int = Field(description="Source width after applying EXIF orientation.")
     source_height: int = Field(description="Source height after applying EXIF orientation.")
+
+
+class CompressResult(ConvertResult):
+    """Output schema of ``image_compress``."""
+
+    quality_used: int | None = Field(description="JPEG/WebP quality used (None for PNG).")
+    colors_used: int | None = Field(description="PNG palette size, if colours were reduced.")
+    max_bytes: int | None = Field(description="The requested size limit, if any.")
+    target_met: bool | None = Field(description="Whether max_bytes was met (None if not set).")
+    saved_bytes: int = Field(description="input_bytes - output_bytes (negative = larger).")
 
 
 def _tool_error(err: EngineError) -> ToolError:
@@ -292,6 +305,88 @@ def build_server(
         dest = info.pop("output_file")
         log.info("image_resize ok: %sx%s", info["width"], info["height"])
         return ResizeResult(source=root.display(real), output=_display_output(root, dest), **info)
+
+    @server.tool(
+        name="image_compress",
+        title="Compress image",
+        description=(
+            "Make an image file smaller and save it as a NEW file in the output folder "
+            "(original never changed, existing files never overwritten). JPEG/WebP: give a "
+            "quality (default 80) OR max_bytes, and the highest quality that fits is found "
+            "automatically. PNG stays lossless unless 'colors' (2-256) or max_bytes asks for "
+            "palette reduction. Reports before/after sizes; warns if the target cannot be met "
+            "or the result is not smaller. Keeps the source format unless 'format' is given. "
+            "EXIF/GPS metadata is removed. Default name: '<source>-compressed'."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=False,
+            open_world_hint=False,
+        ),
+    )
+    def image_compress(
+        path: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=MAX_PATH_CHARS,
+                description="Source image path relative to the input folder.",
+            ),
+        ],
+        quality: Annotated[
+            int | None,
+            Field(ge=1, le=100, description="JPEG/WebP quality 1-100. Default 80."),
+        ] = None,
+        max_bytes: Annotated[
+            int | None,
+            Field(
+                ge=MIN_TARGET_BYTES,
+                le=MAX_FILE_BYTES,
+                description="Target maximum file size in bytes (e.g. 200000 for ~200 KB). "
+                "Do not combine with quality.",
+            ),
+        ] = None,
+        min_quality: Annotated[
+            int,
+            Field(ge=1, le=95, description="Lowest JPEG/WebP quality max_bytes may go down to."),
+        ] = 10,
+        colors: Annotated[
+            int | None,
+            Field(ge=2, le=256, description="PNG only: reduce to this many colours (lossy)."),
+        ] = None,
+        format: Annotated[
+            Literal["jpeg", "png", "webp"] | None,
+            Field(description="Output format. Default: same as the source."),
+        ] = None,
+        output_name: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_STEM_CHARS,
+                description="Optional file name WITHOUT extension. Letters, digits, space, "
+                "'.', '_' and '-' only. Default: '<source name>-compressed'.",
+            ),
+        ] = None,
+    ) -> CompressResult:
+        try:
+            real = root.resolve(path)
+            info = compress_image(
+                real,
+                out,
+                output_name,
+                target=format,
+                quality=quality,
+                max_bytes=max_bytes,
+                min_quality=min_quality,
+                colors=colors,
+                limits=limits,
+            )
+        except EngineError as err:
+            log.info("image_compress refused: %s", err.code)
+            raise _tool_error(err) from None
+        dest = info.pop("output_file")
+        log.info("image_compress ok: %s -> %s bytes", info["input_bytes"], info["output_bytes"])
+        return CompressResult(source=root.display(real), output=_display_output(root, dest), **info)
 
     return server
 

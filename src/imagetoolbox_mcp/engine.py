@@ -6,6 +6,7 @@ own and reused if the transport layer changes.
 
 from __future__ import annotations
 
+import io
 import os
 import stat
 from dataclasses import dataclass
@@ -185,24 +186,23 @@ def _load_upright(src: str | os.PathLike[str], limits: Limits) -> _Loaded:
     return _Loaded(upright, src_format, in_bytes, had_gps, icc, warnings)
 
 
-def _encode_new(
+def _encoder_setup(
     loaded: _Loaded,
     image: Image.Image,
     target: str,
-    out,
-    stem: str,
     *,
     quality: int,
     lossless: bool,
     background: tuple[int, int, int],
-) -> dict:
-    """Prepare ``image`` for ``target``, strip metadata and write it as a new file."""
-    fmt, ext, _ = CONVERT_FORMATS[target]
+):
+    """Return (pixels ready for ``target`` with metadata stripped, encoder params, warnings)."""
+    fmt, _, _ = CONVERT_FORMATS[target]
     warnings = list(loaded.warnings)
     pixels, more = _prepare_pixels(image, target, background)
     warnings.extend(more)
     # Drop every ancillary chunk (EXIF, XMP, text, comments); some encoders read
     # them from ``info`` implicitly. Only palette transparency survives.
+    # (``image`` is always our private decoded copy, so editing its ``info`` is safe.)
     pixels.info = {k: v for k, v in pixels.info.items() if k == "transparency"}
 
     params: dict = {}
@@ -216,20 +216,24 @@ def _encode_new(
         params.update(quality=int(quality), lossless=bool(lossless), method=4)
     else:
         params.update(optimize=True)
+    return pixels, params, warnings
 
-    def _write(fh):
-        try:
-            pixels.save(fh, format=fmt, **params)
-        except (OSError, ValueError) as exc:
-            raise EngineError(
-                "encode_failed", f"Could not encode {fmt}: {type(exc).__name__}."
-            ) from None
 
-    dest = out.write_new(stem, ext, _write)
+def _save(pixels: Image.Image, fh, target: str, params: dict) -> None:
+    fmt = CONVERT_FORMATS[target][0]
+    try:
+        pixels.save(fh, format=fmt, **params)
+    except (OSError, ValueError) as exc:
+        raise EngineError(
+            "encode_failed", f"Could not encode {fmt}: {type(exc).__name__}."
+        ) from None
+
+
+def _result(loaded: _Loaded, pixels: Image.Image, target: str, dest: Path, warnings) -> dict:
     return {
         "output_file": dest,
         "source_format": loaded.source_format,
-        "format": fmt,
+        "format": CONVERT_FORMATS[target][0],
         "width": pixels.size[0],
         "height": pixels.size[1],
         "mode": pixels.mode,
@@ -240,6 +244,27 @@ def _encode_new(
         "icc_profile_kept": bool(loaded.icc),
         "warnings": warnings,
     }
+
+
+def _encode_new(
+    loaded: _Loaded,
+    image: Image.Image,
+    target: str,
+    out,
+    stem: str,
+    *,
+    quality: int,
+    lossless: bool,
+    background: tuple[int, int, int],
+) -> dict:
+    """Prepare ``image`` for ``target``, strip metadata and write it as a new file."""
+    pixels, params, warnings = _encoder_setup(
+        loaded, image, target, quality=quality, lossless=lossless, background=background
+    )
+    dest = out.write_new(
+        stem, CONVERT_FORMATS[target][1], lambda fh: _save(pixels, fh, target, params)
+    )
+    return _result(loaded, pixels, target, dest, warnings)
 
 
 def _check_encode_args(target: str, quality: int) -> None:
@@ -451,4 +476,161 @@ def resize_image(
         background=background,
     )
     result["source_width"], result["source_height"] = im.size
+    return result
+
+
+# --- compress (milestone M3) --------------------------------------------------------------
+
+DEFAULT_COMPRESS_QUALITY = 80
+MIN_TARGET_BYTES = 1024
+_QUANTIZE_MODES = ("RGB", "RGBA")
+PALETTE_LADDER = (2, 4, 8, 16, 32, 64, 128, 256)
+
+
+def _quantize(pixels: Image.Image, colors: int) -> Image.Image:
+    """Reduce to a ``colors``-entry palette (PNG). Alpha is kept via FASTOCTREE."""
+    src = (
+        pixels
+        if pixels.mode in _QUANTIZE_MODES
+        else pixels.convert("RGBA" if _has_alpha(pixels) else "RGB")
+    )
+    method = Image.Quantize.FASTOCTREE if src.mode == "RGBA" else Image.Quantize.MEDIANCUT
+    return src.quantize(colors=colors, method=method, dither=Image.Dither.FLOYDSTEINBERG)
+
+
+def _encoded(pixels: Image.Image, target: str, params: dict) -> bytes:
+    buf = io.BytesIO()
+    _save(pixels, buf, target, params)
+    return buf.getvalue()
+
+
+def compress_image(
+    src: str | os.PathLike[str],
+    out,
+    stem: str | None,
+    *,
+    target: str | None = None,
+    quality: int | None = None,
+    max_bytes: int | None = None,
+    min_quality: int = 10,
+    colors: int | None = None,
+    background: tuple[int, int, int] = (255, 255, 255),
+    limits: Limits = DEFAULT_LIMITS,
+) -> dict:
+    """Re-encode ``src`` smaller and write a *new* file in ``out``.
+
+    JPEG/WebP: fixed ``quality`` (default 80), or ``max_bytes`` = the highest quality in
+    ``[min_quality, 95]`` whose output fits (binary search). PNG: lossless optimisation,
+    optional ``colors`` (2-256) palette reduction; with ``max_bytes`` the largest palette in
+    ``PALETTE_LADDER`` (2, 4, ... 256 colours) that fits is used.
+    If the target cannot be met, the smallest attempt is kept with a ``target_not_met``
+    warning. ``stem`` None means ``<source name>-compressed``.
+    """
+    from .output import default_stem, validate_stem  # local import: output imports engine
+
+    if quality is not None and max_bytes is not None:
+        raise EngineError("invalid_argument", "Give either quality or max_bytes, not both.")
+    if quality is not None and not 1 <= int(quality) <= 100:
+        raise EngineError("invalid_argument", "Quality must be between 1 and 100.")
+    if max_bytes is not None and not MIN_TARGET_BYTES <= int(max_bytes) <= limits.max_file_bytes:
+        raise EngineError(
+            "invalid_argument",
+            f"max_bytes must be between {MIN_TARGET_BYTES} and {limits.max_file_bytes}.",
+        )
+    if not 1 <= int(min_quality) <= 95:
+        raise EngineError("invalid_argument", "min_quality must be between 1 and 95.")
+    if colors is not None and not 2 <= int(colors) <= 256:
+        raise EngineError("invalid_argument", "colors must be between 2 and 256.")
+    if target is not None:
+        _check_encode_args(target, DEFAULT_COMPRESS_QUALITY)
+    if stem is not None:
+        stem = validate_stem(stem)
+    loaded = _load_upright(src, limits)
+    if target is None:
+        target = default_target_for(loaded.source_format)
+        if CONVERT_FORMATS[target][0] != loaded.source_format:
+            loaded.warnings.append(
+                f"format_changed: {loaded.source_format} output is not supported; saved as PNG."
+            )
+    if colors is not None and target != "png":
+        loaded.warnings.append("colors_ignored: palette reduction only applies to PNG.")
+    if quality is not None and target == "png":
+        loaded.warnings.append("quality_ignored: PNG is lossless; use colors or max_bytes.")
+
+    q0 = DEFAULT_COMPRESS_QUALITY if quality is None else int(quality)
+    pixels, params, warnings = _encoder_setup(
+        loaded, loaded.image, target, quality=q0, lossless=False, background=background
+    )
+    quality_used: int | None = None
+    colors_used: int | None = None
+
+    if target == "png":
+        if colors is not None:
+            pixels = _quantize(pixels, int(colors))
+            colors_used = int(colors)
+        data = _encoded(pixels, target, params)
+        if max_bytes is not None and len(data) > max_bytes and colors is None:
+            # Most colours that fit: walk the ladder down from 256 and stop at the first fit.
+            # (Not a binary search: PNG size is not monotonic in palette size, e.g. 16
+            # colours packs to 4-bit and can be larger than 32.) Probes skip ``optimize``,
+            # the slow part; optimisation only shrinks the final file further.
+            fast = {k: v for k, v in params.items() if k != "optimize"}
+            best = None  # (colors, image) that fits, with the most colours
+            smallest = None  # (size, colors, image) fallback if nothing fits
+            for n in reversed(PALETTE_LADDER):
+                cand = _quantize(pixels, n)
+                size = len(_encoded(cand, target, fast))
+                if smallest is None or size < smallest[0]:
+                    smallest = (size, n, cand)
+                if size <= max_bytes:
+                    best = (n, cand)
+                    break
+            colors_used, pixels = best if best is not None else smallest[1:]
+            data = _encoded(pixels, target, params)
+            warnings.append(
+                f"palette_reduced: reduced to {colors_used} colours to approach max_bytes."
+            )
+    else:
+        if max_bytes is None:
+            quality_used = q0
+            data = _encoded(pixels, target, params)
+        else:
+            best = None
+            smallest = None
+            lo, hi = int(min_quality), 95
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                cdata = _encoded(pixels, target, {**params, "quality": mid})
+                if smallest is None or len(cdata) < len(smallest[1]):
+                    smallest = (mid, cdata)
+                if len(cdata) <= max_bytes:
+                    best = (mid, cdata)
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            quality_used, data = best if best is not None else smallest
+
+    target_met = None if max_bytes is None else len(data) <= max_bytes
+    if target_met is False:
+        warnings.append(
+            f"target_not_met: the smallest result is {len(data)} bytes, above max_bytes "
+            f"({max_bytes}). Try image_resize first, a lower min_quality, or WebP."
+        )
+    if len(data) >= loaded.input_bytes:
+        warnings.append(
+            "larger_than_source: the result is not smaller than the original "
+            f"({len(data)} vs {loaded.input_bytes} bytes); the original may already be "
+            "well compressed."
+        )
+    if stem is None:
+        stem = f"{default_stem(Path(src))[: 100 - 11]}-compressed"
+    dest = out.write_new(stem, CONVERT_FORMATS[target][1], lambda fh: fh.write(data))
+    result = _result(loaded, pixels, target, dest, warnings)
+    result.update(
+        quality_used=quality_used,
+        colors_used=colors_used,
+        max_bytes=max_bytes,
+        target_met=target_met,
+        saved_bytes=loaded.input_bytes - result["output_bytes"],
+    )
     return result
