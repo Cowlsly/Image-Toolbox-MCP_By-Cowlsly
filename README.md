@@ -24,6 +24,8 @@ You choose **one input folder**; the server can only read images inside it. Path
 | `image_crop` | Either a box — `width`, `height`, optional `left`/`top` (default 0) in pixels of the displayed image — or only `aspect` (`"1:1"`, `"16:9"`…) for the largest centred crop. Boxes outside the image are refused with `[crop_out_of_bounds]` and the real size (never silently clamped). Same format/metadata rules as resize. Default name `<source>-crop-<W>x<H>`. |
 | `image_batch` | Apply one `operation` (`convert`, `resize`, `compress`, `rotate_flip`, `crop`) with its `options` (same as the single tool, no `path`/`output_name`) to every image directly inside `folder` (no sub-folders; optional name `pattern` like `*.jpg`). One file at a time; a failing file is reported and the rest continue. `dry_run: true` only lists the files. Refuses (instead of truncating) more than `max_files` (default 50, max 200) or 1 GiB in total. Writes a JSON manifest (options, sources, outputs, SHA-256 checksums, failures) to the output folder. Sends progress; on cancel, finished files are kept and recorded. Rules: [ADR-0004](docs/adr/0004-batch-processing.md). |
 
+Input formats: JPEG (incl. multi-picture MPO), PNG, WebP, GIF, TIFF, BMP — anything else is refused with `[unsupported_format]`. Security design and known limits: [`docs/threat-model.md`](docs/threat-model.md).
+
 Format limits: JPEG has no transparency (it is filled with white and a warning is returned); converting a JPEG to PNG/WebP does not bring back detail already lost; animated images are converted from their first frame only.
 
 Run it (an MCP client normally launches this for you):

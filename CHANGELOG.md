@@ -4,6 +4,19 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-20
+
+### Added
+- `docs/threat-model.md` (M6): trust boundaries, assets, threats T1–T12 each mapped to its control and test, residual risks R1–R5, rules for future changes.
+- 20 new tests (189 total): deterministic mutation fuzzing of JPEG/PNG/WebP/GIF/TIFF/BMP (truncation, byte flips, length-field corruption, deleted slices) through inspect/convert/resize; header-only decompression bombs; decoder allowlist incl. an EPS that must not start Ghostscript; multi-picture (MPO) phone JPEGs; parser-exception mapping; swap-after-check races (symlink, FIFO, grown file); tool catch-all for sync, write and async tools (result and log free of paths); compress time budget.
+
+### Changed
+- **Input formats are now an allowlist:** JPEG (incl. MPO), PNG, WebP, GIF, TIFF, BMP. Other formats Pillow could open (ICO, PCX, PPM, TGA, PSD, EPS, ...) are refused with `[unsupported_format]`.
+- Malformed files always give `[decode_failed]` (or `[out_of_memory]`/`[too_many_pixels]`); before, fuzzing found 9 crash classes (e.g. GIF `IndexError`, PNG `SyntaxError`, `OSError` from `image_inspect`) that surfaced as an unexplained "Error executing tool".
+- Input files are opened with `O_NOFOLLOW`/`O_NONBLOCK` and re-checked with `fstat` on the open descriptor; Pillow reads the descriptor, not the path.
+- Any unexpected exception in a tool returns a fixed `[internal_error]` message and is logged as its type only (no traceback text that could contain paths).
+- `image_compress` `max_bytes` search stops after 30 s (`Limits.max_search_seconds`) and keeps the best result with warning `time_budget_reached` (a 64 MP PNG search went from > 120 s to 37 s in the cloud test).
+
 ## [0.6.0] - 2026-10-17
 
 ### Added
