@@ -40,7 +40,18 @@ def main(argv: list[str] | None = None) -> int:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log verbosity on stderr (default WARNING). Logs never include image bytes.",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Check this install (versions, codecs, every tool on generated images, a stdio "
+        "child process) in a temporary folder, print PASS/FAIL lines and exit. No --root needed.",
+    )
     args = parser.parse_args(argv)
+
+    if args.self_test:
+        from .selftest import run_self_test
+
+        return run_self_test()
 
     if not args.root:
         print(
