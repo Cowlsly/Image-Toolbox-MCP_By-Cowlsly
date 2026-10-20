@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1–M4 done, M0 mostly done, M7 research done; phone check + M6 next) | Version: 0.6 | Updated: 2026-10-17
+> Status: ACTIVE (M1–M4 done, M6 done for local mode, M0 mostly done, M7 research done; M9 release prep + owner phone check next) | Version: 0.7 | Updated: 2026-10-20
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -124,15 +124,15 @@ Compatible AI client
 **Exit:** a real device successfully performs an authorized operation with repeatable tests. If infeasible, publish the independent local backend instead.
 
 ### M6 — Privacy, safety and threat modeling [P0 before public beta]
-- [ ] Threat-model path traversal, symlinks, malicious images, decompression bombs and metadata leakage.
-- [ ] Enforce allowlisted inputs/outputs or per-operation explicit grants.
-- [ ] Never expose arbitrary filesystem, network, process or shell access as MCP tools.
-- [ ] Require confirmation for destructive, overwrite or sharing operations.
-- [ ] Clearly disclose metadata policy. **Amended 2026-10-17 (run 4):** was "strip GPS/private EXIF only on explicit request"; ADR-0002 instead strips EXIF/XMP/GPS from every *new* output by default (originals are untouched), because silently copying location data into files a user may share is the bigger privacy risk. An explicit `keep_metadata` opt-in can be added later if needed.
-- [ ] Use timeouts, resource quotas, parser isolation where possible and dependency patching.
-- [ ] Do not log image content, access tokens or private image metadata.
-- [ ] Document vulnerability reporting, retention and temporary-file cleanup.
-**Exit:** security checklist reviewed, negative tests pass, critical vulnerabilities resolved.
+- [x] Threat-model path traversal, symlinks, malicious images, decompression bombs and metadata leakage. — `docs/threat-model.md` (T1–T12, residual risks R1–R5), run 10.
+- [x] Enforce allowlisted inputs/outputs or per-operation explicit grants. — `InputRoot` + `OutputDir` (runs 3–4); input open re-checked on the descriptor (`O_NOFOLLOW` + `fstat`, `test_engine_open_race.py`, run 10). Residual: directory-component race R1.
+- [x] Never expose arbitrary filesystem, network, process or shell access as MCP tools. — 7 image tools only, asserted by `test_server.py`; decoder allowlist keeps Pillow's EPS plugin from ever starting Ghostscript (`test_malformed_inputs.py`, run 10).
+- [x] Require confirmation for destructive, overwrite or sharing operations. — None exist: no tool overwrites, deletes or shares (ADR-0002); write tools are annotated non-destructive. Any future such tool must be opt-in and annotated `destructive_hint=true`.
+- [x] Clearly disclose metadata policy (README tool table, ADR-0002, threat model T8). **Amended 2026-10-17 (run 4):** was "strip GPS/private EXIF only on explicit request"; ADR-0002 instead strips EXIF/XMP/GPS from every *new* output by default (originals are untouched), because silently copying location data into files a user may share is the bigger privacy risk. An explicit `keep_metadata` opt-in can be added later if needed.
+- [ ] Use timeouts, resource quotas, parser isolation where possible and dependency patching. — **Partly** (run 10): size/pixel/batch quotas, 30 s compress-search budget (`test_engine_budget.py`), decoder allowlist, malformed-file → stable error mapping (fuzz tests), Dependabot. Open: hard per-call timeout / subprocess parser isolation (R2, M10), CI activation (owner).
+- [x] Do not log image content, access tokens or private image metadata. — codes/sizes only; unexpected exceptions logged as type only (`server._guard`, `test_guard.py`, run 10).
+- [x] Document vulnerability reporting, retention and temporary-file cleanup. — SECURITY.md (run 10).
+**Exit:** security checklist reviewed, negative tests pass, critical vulnerabilities resolved. — **Status (run 10):** checklist written and negative tests pass (189); no known critical issue; independent review = VERIFY; timeouts/isolation partly open (R2). Treated as sufficient for the local stdio server and a 0.x release; **not** sufficient for remote mode.
 
 ### M7 — Client interoperability [P1]
 - [x] Validate MCP protocol version and official SDK support. — `tests/integration/test_protocol.py`: 2024-11-05 … 2025-11-25 echoed over real stdio, unknown version answered with a supported one (run 8, SDK 2.2.0).
@@ -273,10 +273,12 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 8. ~~M7 client research~~ Done run 8: `docs/clients.md`, ADR-0003 (stdio stays; phone path = agent CLI in Termux; Claude-app remote path deferred until OAuth + M6). Original item: The owner is phone-only, so the server is useless until some MCP client can reach it. Research (with sources) which clients can launch a local stdio server inside Termux, or whether a phone needs Streamable HTTP on `127.0.0.1` / a tunnel for Claude or ChatGPT remote connectors; write `docs/clients.md` and an ADR if a transport change is needed. Then M4 batch.
 9. **Owner check (VERIFY, highest value now):** on the phone, follow `docs/clients.md` Path A (install the server, then Claude Code or Gemini CLI in Termux, run one tool). This is M7's exit evidence and also answers item 5.
 10. ~~M4 batch~~ Done run 9: `image_batch` (ADR-0004), 169 tests. Retries/resume deferred.
-11. **Next agent run (run 10): M6 threat model** — write `docs/threat-model.md` (assets, attackers, entry points; path traversal, symlink races, decompression bombs, malformed files, metadata leakage, resource exhaustion, prompt-injected tool arguments), map each threat to the existing control and test, add fuzz-style tests with malformed/truncated files for every format, and close the gaps found (e.g. a per-call time budget). Prerequisite for any remote/HTTP mode.
-12. Then M9 release prep (tagged 0.x release, Termux install notes verified by the owner) and only then Android-specific bridging (M5).
+11. ~~M6 threat model~~ Done run 10: `docs/threat-model.md`, decoder allowlist, malformed-file fuzz tests, race-safe open, tool catch-all, compress time budget (v0.7.0, 189 tests). Original item: **M6 threat model** — write `docs/threat-model.md` (assets, attackers, entry points; path traversal, symlink races, decompression bombs, malformed files, metadata leakage, resource exhaustion, prompt-injected tool arguments), map each threat to the existing control and test, add fuzz-style tests with malformed/truncated files for every format, and close the gaps found (e.g. a per-call time budget). Prerequisite for any remote/HTTP mode.
+12. **Next agent run (run 11): M9 release prep** — `docs/install-termux.md` (exact commands, expected output, troubleshooting), release checklist, version 0.7.x tag + GitHub release notes written as a draft for the owner to publish, `python -m imagetoolbox_mcp --self-test` (or similar) so the owner can check an install on the phone in one command. Original item: Then M9 release prep (tagged 0.x release, Termux install notes verified by the owner) and only then Android-specific bridging (M5).
 
-**Current checkpoint (2026-10-17, run 9):** M1–M4 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch` over stdio, 169 tests passing. M7 research done (ADR-0003, `docs/clients.md`); real-client evidence waits on the owner's phone. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
+**Current checkpoint (2026-10-20, run 10):** M6 threat model done for the local stdio server (`docs/threat-model.md`); hardening shipped in 0.7.0; 189 tests. Next: M9 release prep.
+
+**Previous checkpoint (2026-10-17, run 9):** M1–M4 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch` over stdio, 169 tests passing. M7 research done (ADR-0003, `docs/clients.md`); real-client evidence waits on the owner's phone. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
 
 **Roadmap change (2026-10-17, run 9):** after M6, M9 release prep (a tagged 0.x release with phone-verified install notes) is placed before M5, because the owner needs something installable to test on the phone, and M5 (Android bridge) is only worth doing once the local server is proven there.
 

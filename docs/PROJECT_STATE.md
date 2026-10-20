@@ -12,12 +12,13 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M3 Core operations | **COMPLETE** (2026-10-17, run 7) — convert + output policy (run 4), resize (run 5), compress (run 6), rotate/flip + crop (run 7) |
 | M4 Batch | **COMPLETE** (2026-10-17, run 9) — `image_batch`, ADR-0004; retries/resume deferred |
 | M7 Client interoperability | ACTIVE — research + ADR-0003 + protocol test done (run 8); real-client evidence = owner's phone (VERIFY) |
-| M6 Threat model | NEXT (run 10) — required before any HTTP/remote mode |
-| M5, M8–M10 | PENDING |
+| M6 Threat model | **DONE for local stdio mode** (2026-10-20, run 10) — `docs/threat-model.md`; hard timeout/parser isolation (R2) and independent review open; remote mode needs a new section |
+| M9 Release prep | NEXT (run 11) |
+| M5, M8, M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch`. Version 0.6.0.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch`. Version 0.7.0. Inputs: JPEG/MPO, PNG, WebP, GIF, TIFF, BMP only.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -33,6 +34,21 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-20 — run 10 (Claude, scheduled)
+
+**Done (M6 — threat model + hardening, v0.7.0)**
+- Oriented at 00:43 UTC: last commit 2026-10-17 19:03 UTC (run 9, same agent); no other agent activity, no clash. `ci/ci.yml` still not moved (blocker 4); `git push` still denied (blocker 2) → committed via the connector. No phone results from the owner yet.
+- Fuzzed the engine first (scratch harness, 7 formats × 300 mutants × inspect/convert, seeds 1–3): **9 crash classes escaped** as non-`EngineError` exceptions — GIF `IndexError`, PNG `SyntaxError`, ICO `ValueError`, and `OSError` from `image_inspect` (it had no `OSError` handler) for BMP/JPEG/PNG/WebP/ICO. No host path leaked in any `EngineError`. The SDK hides the text of unexpected exceptions from the client but logs the full traceback (message may contain a path).
+- Fixes: `engine._open` (decoder allowlist JPEG/PNG/WebP/GIF/TIFF/BMP via `Image.open(formats=...)`; `O_NOFOLLOW|O_NONBLOCK` open + `fstat` re-check on the descriptor) and `engine._decode_error` (parser exceptions → `decode_failed`, `MemoryError` → `out_of_memory`, bombs → `too_many_pixels`), used by inspect and every write tool. `server._guard`/`_tool`: every tool registered through a catch-all → fixed `[internal_error]`, logged as type only. `Limits.max_search_seconds` = 30 s for compress `max_bytes` searches (warning `time_budget_reached`).
+- Gotcha found: `"MPO"` is not a valid `formats=` entry (KeyError inside Pillow, which my new mapping then turned into `decode_failed` for *every* file — caught by the existing 169 tests). MPO files still open through the JPEG opener; test added.
+- Measured on a 64 MP noise JPEG (cloud): inspect 0.0 s, convert→PNG 25 s, resize 1.8 s, JPEG `max_bytes` 4.8 s, PNG `max_bytes` > 120 s before the budget → 37 s after.
+- Commit slip: the first connector commit (`1387cc9`) accidentally replaced `src/imagetoolbox_mcp/__init__.py` with a placeholder; fixed in the very next commit (`9d27fb4`). After pushing, `git fetch` + `git diff origin/root` showed `src/` and `tests/` identical to the tested tree.
+- `docs/threat-model.md`: boundaries, assets, T1–T12 → control → test, residual risks R1 (directory-component race), R2 (no hard per-call timeout / parser isolation), R3 memory on phones, R4 no output quota, R5 C-level parser bugs; rules for future changes. SECURITY.md: allowlist, link, data retention + temp-file cleanup. README input-format line. Roadmap M6 ticked item by item (timeouts/isolation item left open as "partly"). Version 0.7.0, CHANGELOG.
+
+**Tests:** 189 OK (was 169), three consecutive full runs with `-W error::ResourceWarning`; same 189 pass against the wheel installed in a venv (`imagetoolbox-mcp --version` → 0.7.0). New: `tests/unit/test_malformed_inputs.py` (fuzz 6 formats × 40 × 3 ops, allowlist, EPS-no-Ghostscript, MPO, bombs, exception mapping), `test_engine_open_race.py`, `test_engine_budget.py`, `tests/integration/test_guard.py`. Extra hand-run fuzz after the fix: seeds 1–5 × 300 mutants × 7 formats × 2 ops → zero escapes, zero leaks. `ruff check`/`format --check` clean. GitHub CI still not run (blocker 4).
+
+**Next action (run 11):** M9 release prep — `docs/install-termux.md` (exact Termux commands, expected output, troubleshooting incl. pydantic-core build), a one-command install self-check for the phone (e.g. `imagetoolbox-mcp --self-test` that creates a temp image and runs inspect/convert in-process), release checklist, draft GitHub release notes for 0.7.x for the owner to publish. If the owner has reported Path A phone results, record them in M7 first.
 
 ### 2026-10-17 — run 9 (Claude, scheduled)
 
@@ -159,4 +175,4 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 **Tests:** `python3 -m unittest` → 11 tests, all OK (0.04 s). `ruff check` + `ruff format --check` → clean. Fork not modified.
 
-**Next action (run 2):** M0 scaffold — `pyproject.toml` (deps `pillow`, `mcp`; console script), `.github/workflows/ci.yml` (ruff + unittest, Python 3.10–3.13, pinned action SHAs), CONTRIBUTING.md, SECURITY.md, CHANGELOG.md. Then run 3: M2 `image.inspect` MCP tool with allowlisted root + in-process client test.
+**Next action (run 2):** M2 — `src/imagetoolbox_mcp/server.py`: stdio MCP server (mcp 2.x `MCPServer`) exposing `image.inspect` wrapping `engine.inspect_image`, with an allowlisted input root (CLI flag/env var, required), path resolution that rejects escapes/symlinks, structured error results, and an in-process MCP client integration test in `tests/integration/`. If the owner has moved the workflow, check its result; if `ci/ci.yml` still exists and `.github/workflows/ci.yml` too, delete the staged copy.
