@@ -53,7 +53,7 @@ imagetoolbox-mcp --version
 
 Lint: `ruff check src tests && ruff format --check src tests`.
 
-Termux (Android): `pkg install python python-pillow`, then `pip install mcp` — still being verified, see [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md). More in [CONTRIBUTING.md](CONTRIBUTING.md); security reports: [SECURITY.md](SECURITY.md).
+Termux (Android): step-by-step guide in [docs/install-termux.md](docs/install-termux.md) (VERIFY on a real phone). Check any install with `imagetoolbox-mcp --self-test` — it runs every tool on generated images in a temporary folder and prints PASS/FAIL per check. More in [CONTRIBUTING.md](CONTRIBUTING.md); security reports: [SECURITY.md](SECURITY.md).
 
 ## Licence
 
