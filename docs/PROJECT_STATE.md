@@ -175,4 +175,4 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 **Tests:** `python3 -m unittest` → 11 tests, all OK (0.04 s). `ruff check` + `ruff format --check` → clean. Fork not modified.
 
-**Next action (run 2):** M2 — `src/imagetoolbox_mcp/server.py`: stdio MCP server (mcp 2.x `MCPServer`) exposing `image.inspect` wrapping `engine.inspect_image`, with an allowlisted input root (CLI flag/env var, required), path resolution that rejects escapes/symlinks, structured error results, and an in-process MCP client integration test in `tests/integration/`. If the owner has moved the workflow, check its result; if `ci/ci.yml` still exists and `.github/workflows/ci.yml` too, delete the staged copy.
+**Next action (run 2):** M0 scaffold — `pyproject.toml` (deps `pillow`, `mcp`; console script), `.github/workflows/ci.yml` (ruff + unittest, Python 3.10–3.13, pinned action SHAs), CONTRIBUTING.md, SECURITY.md, CHANGELOG.md. Then run 3: M2 `image.inspect` MCP tool with allowlisted root + in-process client test.
