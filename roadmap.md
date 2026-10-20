@@ -1,6 +1,6 @@
 # Image Toolbox MCP by Cowlsly — Development Roadmap
 
-> Status: ACTIVE (M1–M4 done, M6 done for local mode, M0 mostly done, M7 research done; M9 release prep + owner phone check next) | Version: 0.7 | Updated: 2026-10-20
+> Status: ACTIVE (M1–M4 done, M6 done for local mode, M0 mostly done, M7 research done, M9 started: self-test + Termux guide + release checklist; owner phone check + first pre-release next) | Version: 0.8 | Updated: 2026-10-20
 >
 > Repository: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly
 > Upstream Android project: https://github.com/T8RIN/ImageToolbox
@@ -144,7 +144,7 @@ Compatible AI client
 **Exit:** documented evidence of successful tool calls per advertised client.
 
 ### M8 — Documentation and accessibility [P1]
-- [ ] Quick start, architecture, threat model, tool catalog and troubleshooting.
+- [ ] Quick start, architecture, threat model, tool catalog and troubleshooting. — **Partly**: threat model (run 10), tool table in README, phone install + troubleshooting in `docs/install-termux.md` (run 11, VERIFY on phone).
 - [ ] Android/mobile-first instructions with screenshots that match tested versions.
 - [ ] Examples for bulk JPEG-to-PNG, resize, compression and metadata cleanup.
 - [ ] Accessibility review for any companion UI; plain-language error messages.
@@ -152,9 +152,9 @@ Compatible AI client
 **Exit:** newcomer can install, test and safely process a sample image.
 
 ### M9 — Release engineering [P1]
-- [ ] Semantic versioning, signed tags where supported, changelog and SBOM.
+- [ ] Semantic versioning, signed tags where supported, changelog and SBOM. — **Partly** (run 11): SemVer rules + changelog + tag/release procedure in `docs/release-checklist.md`; draft notes `docs/releases/v0.8.0.md`. Open: first tag (owner), signed tags, SBOM.
 - [ ] CI matrix for supported runtimes/OSes; Android build checks if applicable.
-- [ ] Automated unit/integration/security checks and reproducible release artifacts.
+- [ ] Automated unit/integration/security checks and reproducible release artifacts. — **Partly** (run 11): `imagetoolbox-mcp --self-test` gives a one-command install check (`tests/unit/test_selftest.py`; passes from a wheel installed in a fresh venv). Open: CI (owner must move `ci/ci.yml`), reproducible artifacts.
 - [ ] License/attribution audit and dependency vulnerability review.
 - [ ] Publish alpha -> beta -> stable only after each gate passes.
 **Exit:** clean installation from published release and documented rollback.
@@ -274,9 +274,13 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 9. **Owner check (VERIFY, highest value now):** on the phone, follow `docs/clients.md` Path A (install the server, then Claude Code or Gemini CLI in Termux, run one tool). This is M7's exit evidence and also answers item 5.
 10. ~~M4 batch~~ Done run 9: `image_batch` (ADR-0004), 169 tests. Retries/resume deferred.
 11. ~~M6 threat model~~ Done run 10: `docs/threat-model.md`, decoder allowlist, malformed-file fuzz tests, race-safe open, tool catch-all, compress time budget (v0.7.0, 189 tests). Original item: **M6 threat model** — write `docs/threat-model.md` (assets, attackers, entry points; path traversal, symlink races, decompression bombs, malformed files, metadata leakage, resource exhaustion, prompt-injected tool arguments), map each threat to the existing control and test, add fuzz-style tests with malformed/truncated files for every format, and close the gaps found (e.g. a per-call time budget). Prerequisite for any remote/HTTP mode.
-12. **Next agent run (run 11): M9 release prep** — `docs/install-termux.md` (exact commands, expected output, troubleshooting), release checklist, version 0.7.x tag + GitHub release notes written as a draft for the owner to publish, `python -m imagetoolbox_mcp --self-test` (or similar) so the owner can check an install on the phone in one command. Original item: Then M9 release prep (tagged 0.x release, Termux install notes verified by the owner) and only then Android-specific bridging (M5).
+12. ~~M9 release prep~~ Done run 11 (v0.8.0): `--self-test`, `docs/install-termux.md`, `docs/release-checklist.md`, draft `docs/releases/v0.8.0.md`. Tagging/publishing the release is an owner step (item 13); Android bridging (M5) still comes only after the phone check.
+13. **Owner (VERIFY, 15–40 min on the phone):** follow `docs/install-termux.md`, run `imagetoolbox-mcp --self-test`, paste the output to the agent; then publish the v0.8.0 pre-release (`docs/release-checklist.md` §2). Replaces items 5 and 9.
+14. **Next agent run (run 12): M9 dependency licence + vulnerability review** — `docs/dependencies.md` (every runtime dependency of `mcp` and `pillow` with licence, native/Rust build need on Termux, why it is pulled in) and a small SBOM generator from installed metadata (CycloneDX JSON, stdlib only) with a test; check whether the unused HTTP-side dependencies (uvicorn, starlette, pyjwt[crypto]) can be avoided for a lighter phone install. Then M8 examples (bulk JPEG→PNG, resize, compress, metadata cleanup).
 
-**Current checkpoint (2026-10-20, run 10):** M6 threat model done for the local stdio server (`docs/threat-model.md`); hardening shipped in 0.7.0; 189 tests. Next: M9 release prep.
+**Current checkpoint (2026-10-20, run 11):** v0.8.0 adds `--self-test` and the Termux install guide; 195 tests. Waiting on the owner's phone run and first pre-release tag.
+
+**Previous checkpoint (2026-10-20, run 10):** M6 threat model done for the local stdio server (`docs/threat-model.md`); hardening shipped in 0.7.0; 189 tests. Next: M9 release prep.
 
 **Previous checkpoint (2026-10-17, run 9):** M1–M4 complete: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch` over stdio, 169 tests passing. M7 research done (ADR-0003, `docs/clients.md`); real-client evidence waits on the owner's phone. M0 CI activation still waits on the owner. No Android bridge or releases yet. Handover: `docs/PROJECT_STATE.md`.
 
