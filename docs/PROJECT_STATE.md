@@ -13,12 +13,12 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 | M4 Batch | **COMPLETE** (2026-10-17, run 9) — `image_batch`, ADR-0004; retries/resume deferred |
 | M7 Client interoperability | ACTIVE — research + ADR-0003 + protocol test done (run 8); real-client evidence = owner's phone (VERIFY) |
 | M6 Threat model | **DONE for local stdio mode** (2026-10-20, run 10) — `docs/threat-model.md`; hard timeout/parser isolation (R2) and independent review open; remote mode needs a new section |
-| M9 Release prep | NEXT (run 11) |
+| M9 Release prep | ACTIVE — run 11: `--self-test`, Termux guide, release checklist, draft v0.8.0 notes; tag/release = owner; dependency review + SBOM next |
 | M5, M8, M10 | PENDING |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch`. Version 0.7.0. Inputs: JPEG/MPO, PNG, WebP, GIF, TIFF, BMP only.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch`. Version 0.8.0. Install check: `imagetoolbox-mcp --self-test`. Inputs: JPEG/MPO, PNG, WebP, GIF, TIFF, BMP only.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -26,14 +26,28 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 ## Open blockers / VERIFY items
 
-1. **Cloud sandbox has no PyPI/npm access** (egress proxy returns 403 for pypi.org and registry.npmjs.org). Work relies on preinstalled Python 3.13.16, Pillow 12.3.0, mcp 2.2.0, pydantic 2.13.5, ruff 0.16.8. Pin versions conservatively; CI on GitHub will install from PyPI.
+1. **Cloud sandbox has no PyPI/npm access** (egress proxy returns 403 for pypi.org and registry.npmjs.org). Work relies on preinstalled Python 3.13.16, Pillow 12.3.0, mcp 2.3.0 (was 2.2.0 until run 10; sandbox image updated, all tests still pass), pydantic 2.13.5, ruff 0.16.8. Pin versions conservatively; CI on GitHub will install from PyPI.
 2. **`git push` from the sandbox is denied** (repo not in the session's authorised git set). Workaround used: commit via the GitHub connector (`push_files`). Works, but each file's full content must be sent — keep commits small. Owner can fix by adding this repo to the scheduled task's sources.
-3. **VERIFY on owner's phone (Termux):** `pkg install python python-pillow` then `pip install mcp`. Unknown whether `pydantic-core`/`cryptography` build cleanly. Fallback plan in ADR-0001.
+3. **VERIFY on owner's phone (Termux):** follow `docs/install-termux.md` and run `imagetoolbox-mcp --self-test`. Native deps without Android wheels: `pydantic-core`, `rpds-py` (Rust; may compile 10–30 min), `cryptography` (use Termux `python-cryptography`). Fallback plan in ADR-0001.
 4. **BLOCKED → owner:** CI workflow is staged at `ci/ci.yml`. The GitHub connector returns `403 Resource not accessible by integration` for any commit touching `.github/workflows/` (no `workflows` permission), and `git push` is denied. **Owner fix (phone, 1 min):** open `ci/ci.yml` on github.com → Edit → change the file name/path to `.github/workflows/ci.yml` → delete the 4-line comment header → Commit. Then check the Actions tab for a green run (VERIFY: Actions billing/availability still untested).
 5. **Answered (M7, run 8) → owner VERIFY:** phone path = an agent CLI inside Termux (Claude Code via community installer, or Gemini CLI) launching the stdio server — steps in `docs/clients.md`. Claude Android app needs a public OAuth server (deferred, ADR-0003); ChatGPT MCP connectors are web-only.
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-10-20 — run 11 (Claude, scheduled)
+
+**Done (M9 release prep, v0.8.0)**
+- Oriented at 01:43 UTC: last commits 01:10 UTC (run 10, same agent); no other agent activity, no clash. Blockers 2 and 4 unchanged (`git push` denied, `ci/ci.yml` not moved) → committing via the connector. No phone results from the owner yet. Sandbox MCP SDK is now 2.3.0.
+- `src/imagetoolbox_mcp/selftest.py` + `imagetoolbox-mcp --self-test` (no `--root` needed): versions, codecs (JPEG/zlib required, WebP optional → WARN), all 7 tools via an in-process MCP client on two generated images (EXIF-rotated JPEG, RGBA PNG) in a temp folder, sandbox refusal, real stdio child process, originals byte-identical, PASS/WARN/FAIL lines, exit 0/1, no absolute paths. ~2 s in the cloud.
+- `docs/install-termux.md` (F-Droid Termux, `pkg install python git python-pillow python-cryptography`, Rust/binutils fallback for `pydantic-core`/`rpds-py`, self-test with expected output, troubleshooting table, update/uninstall). Status VERIFY. Found while writing: the MCP SDK pulls in `jsonschema` → `rpds-py` (Rust) and `pyjwt[crypto]` → `cryptography` (Rust) even for stdio-only use — candidates for a lighter install next run.
+- `docs/release-checklist.md` (agent vs owner steps; the connector cannot create tags/releases) and draft `docs/releases/v0.8.0.md`. README, `docs/clients.md`, CHANGELOG 0.8.0, roadmap M8/M9 annotated (partly, not ticked) and §11 items 12–14.
+- Decision: release as **0.8.0** (new feature → minor) rather than 0.7.x.
+- Commits via the connector: `0309f44` (code+tests), `9c977ca` + `a783355` (docs), then roadmap/state; after each, `git fetch` + `cmp` showed the pushed files byte-identical to the tested tree.
+
+**Tests:** 195 OK (was 189) with `-W error::ResourceWarning`; new `tests/unit/test_selftest.py` (full pass incl. stdio child, no paths printed, missing WebP = warning, missing JPEG = fail, a failing tool = exit 1 while other checks still run, CLI flag needs no root). Wheel installed in a fresh venv: `imagetoolbox-mcp --self-test` from outside the repo → `SELF-TEST PASSED: 20 checks`. `ruff check`/`format --check` clean. GitHub CI still not run (blocker 4). Phone: VERIFY.
+
+**Next action (run 12):** M9 dependency licence + vulnerability review: `docs/dependencies.md`, stdlib-only CycloneDX SBOM generator + test, and check whether HTTP-only deps can be avoided for a lighter Termux install. If the owner has sent self-test output, record it first and fix the guide.
 
 ### 2026-10-20 — run 10 (Claude, scheduled)
 
