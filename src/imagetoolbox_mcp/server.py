@@ -12,6 +12,7 @@ Every path is resolved through :class:`~imagetoolbox_mcp.sandbox.InputRoot`.
 from __future__ import annotations
 
 import functools
+import inspect
 import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
@@ -216,6 +217,58 @@ def _tool_error(err: EngineError) -> ToolError:
     return ToolError(f"[{err.code}] {err.message}")
 
 
+INTERNAL_ERROR = (
+    "[internal_error] Unexpected server error; nothing was overwritten. "
+    "Try another file or report a bug."
+)
+
+
+def _guard(fn):
+    """Turn any unexpected exception into a fixed ``[internal_error]`` tool error.
+
+    The SDK would otherwise log the full traceback, whose message may contain host paths
+    or file names (threat model T9). We log the exception *type* only. ``ToolError`` and
+    cancellation (``BaseException``) pass through unchanged.
+    """
+
+    def _fail(exc: Exception):
+        log.warning("%s internal error: %s", fn.__name__, type(exc).__name__)
+        return ToolError(INTERNAL_ERROR)
+
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except ToolError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - deliberate catch-all, see docstring
+                raise _fail(exc) from None
+
+    else:
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except ToolError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - deliberate catch-all, see docstring
+                raise _fail(exc) from None
+
+    return wrapper
+
+
+def _tool(server: MCPServer, **kwargs):
+    """``server.tool(**kwargs)`` with :func:`_guard` applied first."""
+
+    def register(fn):
+        return server.tool(**kwargs)(_guard(fn))
+
+    return register
+
+
 def _display_output(root: InputRoot, path) -> str:
     if path.is_relative_to(root.path):
         return root.display(path)
@@ -243,7 +296,8 @@ def build_server(
         website_url="https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly",
     )
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_inspect",
         title="Inspect image",
         description=(
@@ -278,7 +332,8 @@ def build_server(
         log.info("image_inspect ok: %s %sx%s", info["format"], info["width"], info["height"])
         return InspectResult(path=root.display(real), **info)
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_convert",
         title="Convert image format",
         description=(
@@ -332,7 +387,8 @@ def build_server(
         log.info("image_convert ok: %s -> %s", info["source_format"], info["format"])
         return ConvertResult(source=root.display(real), output=_display_output(root, dest), **info)
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_resize",
         title="Resize image",
         description=(
@@ -416,7 +472,8 @@ def build_server(
         log.info("image_resize ok: %sx%s", info["width"], info["height"])
         return ResizeResult(source=root.display(real), output=_display_output(root, dest), **info)
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_compress",
         title="Compress image",
         description=(
@@ -505,7 +562,8 @@ def build_server(
         open_world_hint=False,
     )
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_rotate_flip",
         title="Rotate or flip image",
         description=(
@@ -563,7 +621,8 @@ def build_server(
             source=root.display(real), output=_display_output(root, dest), **info
         )
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_crop",
         title="Crop image",
         description=(
@@ -636,7 +695,8 @@ def build_server(
         log.info("image_crop ok: %sx%s", info["width"], info["height"])
         return CropResult(source=root.display(real), output=_display_output(root, dest), **info)
 
-    @server.tool(
+    @_tool(
+        server,
         name="image_batch",
         title="Batch process a folder",
         description=BATCH_DESCRIPTION,
