@@ -6,9 +6,13 @@ own and reused if the transport layer changes.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import io
 import os
 import stat
+import struct
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,10 +21,34 @@ from PIL import ExifTags, Image, ImageOps, UnidentifiedImageError
 # Conservative defaults; callers may lower them, never raise them silently.
 MAX_FILE_BYTES = 64 * 1024 * 1024  # 64 MiB
 MAX_PIXELS = 64_000_000  # ~8000 x 8000; guards against decompression bombs
+# Wall-clock budget for image_compress's max_bytes search (M6, threat model T6). A 64 MP
+# PNG palette search took well over a minute in the cloud test; a phone is slower.
+MAX_SEARCH_SECONDS = 30.0
 
 # EXIF tags we are willing to report by default. GPS and maker notes are never included.
 SAFE_EXIF_TAGS = frozenset(
     {"Make", "Model", "Orientation", "DateTime", "Software", "XResolution", "YResolution"}
+)
+
+
+# Decoders we let Pillow use (M6, threat model T4). Everything else -- EPS (which would
+# start Ghostscript), PSD, ICNS, FITS, ... -- is refused as ``unsupported_format`` before
+# its plugin parses a byte. Multi-picture JPEGs from phone cameras still open: Pillow's
+# JPEG opener hands them to its MPO class (``im.format == "MPO"``).
+ALLOWED_INPUT_FORMATS = ("JPEG", "PNG", "WEBP", "GIF", "TIFF", "BMP")
+
+# Exceptions Pillow's parsers raise on malformed input (found by fuzzing, run 10). They are
+# mapped to ``decode_failed`` so a bad file never surfaces as an unexplained crash.
+_DECODE_ERRORS = (
+    OSError,
+    ValueError,
+    SyntaxError,
+    IndexError,
+    KeyError,
+    TypeError,
+    EOFError,
+    struct.error,
+    ZeroDivisionError,
 )
 
 
@@ -37,6 +65,7 @@ class EngineError(Exception):
 class Limits:
     max_file_bytes: int = MAX_FILE_BYTES
     max_pixels: int = MAX_PIXELS
+    max_search_seconds: float = MAX_SEARCH_SECONDS
 
 
 DEFAULT_LIMITS = Limits()
@@ -61,6 +90,57 @@ def _check_regular_file(path: Path, limits: Limits) -> int:
     return st.st_size
 
 
+_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)  # final component must not be a symlink
+    | getattr(os, "O_NONBLOCK", 0)  # a FIFO swapped in must not hang the open
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+@contextlib.contextmanager
+def _open(p: Path, limits: Limits = DEFAULT_LIMITS):
+    """Open ``p`` race-safely and yield a Pillow image restricted to the allowed decoders.
+
+    ``_check_regular_file`` looked at the path with ``lstat``; between that check and the
+    open the file could be swapped for a symlink or FIFO (threat T2). So the file is opened
+    with ``O_NOFOLLOW`` and the *open descriptor* is checked again with ``fstat``; Pillow
+    then reads from that descriptor, never from the path.
+    """
+    try:
+        fd = os.open(p, _OPEN_FLAGS)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise EngineError("symlink_rejected", "Symbolic links are not accepted.") from None
+        if exc.errno == errno.ENOENT:
+            raise EngineError("not_found", "The image file does not exist.") from None
+        raise EngineError("permission_denied", "The image file cannot be read.") from None
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise EngineError("not_a_file", "The input is not a regular file.")
+        if st.st_size > limits.max_file_bytes:
+            raise EngineError("file_too_large", "The file grew past the size limit.")
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fh.fileno(), True)
+        with Image.open(fh, formats=ALLOWED_INPUT_FORMATS) as im:
+            yield im
+
+
+def _decode_error(exc: BaseException) -> EngineError:
+    """Translate an exception raised while parsing/decoding into a stable EngineError."""
+    if isinstance(exc, UnidentifiedImageError):
+        return EngineError(
+            "unsupported_format",
+            "The file is not a recognised image (supported: JPEG, PNG, WebP, GIF, TIFF, BMP).",
+        )
+    if isinstance(exc, Image.DecompressionBombError):
+        return EngineError("too_many_pixels", "Image exceeds the pixel safety limit.")
+    if isinstance(exc, MemoryError):
+        return EngineError("out_of_memory", "Not enough memory to decode this image.")
+    return EngineError("decode_failed", "The image could not be decoded (corrupt or truncated?).")
+
+
 def inspect_image(path: str | os.PathLike[str], limits: Limits = DEFAULT_LIMITS) -> dict:
     """Return format, dimensions, mode, alpha, size and a small set of safe EXIF fields.
 
@@ -69,7 +149,7 @@ def inspect_image(path: str | os.PathLike[str], limits: Limits = DEFAULT_LIMITS)
     p = Path(path)
     size = _check_regular_file(p, limits)
     try:
-        with Image.open(p) as im:
+        with _open(p, limits) as im:
             width, height = im.size
             if width * height > limits.max_pixels:
                 raise EngineError(
@@ -95,10 +175,10 @@ def inspect_image(path: str | os.PathLike[str], limits: Limits = DEFAULT_LIMITS)
                 "exif": safe_exif,
                 "has_gps_metadata": has_gps,
             }
-    except UnidentifiedImageError:
-        raise EngineError("unsupported_format", "The file is not a recognised image.") from None
-    except Image.DecompressionBombError:
-        raise EngineError("too_many_pixels", "Image exceeds the pixel safety limit.") from None
+    except EngineError:
+        raise
+    except (*_DECODE_ERRORS, Image.DecompressionBombError, MemoryError) as exc:
+        raise _decode_error(exc) from None
 
 
 # --- conversion (milestone M3) ------------------------------------------------------------
@@ -156,7 +236,7 @@ def _load_upright(src: str | os.PathLike[str], limits: Limits) -> _Loaded:
     in_bytes = _check_regular_file(p, limits)
     warnings: list[str] = []
     try:
-        with Image.open(p) as im:
+        with _open(p, limits) as im:
             w, h = im.size
             if w * h > limits.max_pixels:
                 raise EngineError(
@@ -175,14 +255,10 @@ def _load_upright(src: str | os.PathLike[str], limits: Limits) -> _Loaded:
             upright = ImageOps.exif_transpose(im)
             if upright is im:
                 upright = im.copy()
-    except UnidentifiedImageError:
-        raise EngineError("unsupported_format", "The file is not a recognised image.") from None
-    except Image.DecompressionBombError:
-        raise EngineError("too_many_pixels", "Image exceeds the pixel safety limit.") from None
-    except OSError:
-        raise EngineError(
-            "decode_failed", "The image could not be decoded (corrupt or truncated?)."
-        ) from None
+    except EngineError:
+        raise
+    except (*_DECODE_ERRORS, Image.DecompressionBombError, MemoryError) as exc:
+        raise _decode_error(exc) from None
     return _Loaded(upright, src_format, in_bytes, had_gps, icc, warnings)
 
 
@@ -565,6 +641,8 @@ def compress_image(
     )
     quality_used: int | None = None
     colors_used: int | None = None
+    deadline = time.monotonic() + limits.max_search_seconds
+    budget_hit = False
 
     if target == "png":
         if colors is not None:
@@ -580,6 +658,9 @@ def compress_image(
             best = None  # (colors, image) that fits, with the most colours
             smallest = None  # (size, colors, image) fallback if nothing fits
             for n in reversed(PALETTE_LADDER):
+                if smallest is not None and time.monotonic() > deadline:
+                    budget_hit = True
+                    break
                 cand = _quantize(pixels, n)
                 size = len(_encoded(cand, target, fast))
                 if smallest is None or size < smallest[0]:
@@ -588,7 +669,8 @@ def compress_image(
                     best = (n, cand)
                     break
             colors_used, pixels = best if best is not None else smallest[1:]
-            data = _encoded(pixels, target, params)
+            # Over budget: skip the slow optimised re-encode; the probe result is valid PNG.
+            data = _encoded(pixels, target, fast if budget_hit else params)
             warnings.append(
                 f"palette_reduced: reduced to {colors_used} colours to approach max_bytes."
             )
@@ -601,6 +683,9 @@ def compress_image(
             smallest = None
             lo, hi = int(min_quality), 95
             while lo <= hi:
+                if smallest is not None and time.monotonic() > deadline:
+                    budget_hit = True
+                    break
                 mid = (lo + hi) // 2
                 cdata = _encoded(pixels, target, {**params, "quality": mid})
                 if smallest is None or len(cdata) < len(smallest[1]):
@@ -612,6 +697,12 @@ def compress_image(
                     hi = mid - 1
             quality_used, data = best if best is not None else smallest
 
+    if budget_hit:
+        warnings.append(
+            f"time_budget_reached: the max_bytes search stopped after "
+            f"{limits.max_search_seconds:g} s with the best result so far. Resize the image "
+            "first for a faster, better fit."
+        )
     target_met = None if max_bytes is None else len(data) <= max_bytes
     if target_met is False:
         warnings.append(
