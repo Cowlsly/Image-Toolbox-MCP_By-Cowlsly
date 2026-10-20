@@ -4,6 +4,17 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-20
+
+### Added
+- `imagetoolbox-mcp --self-test` (M9): checks Python/Pillow/MCP SDK versions and codecs (JPEG, zlib required; WebP optional → warning), runs all 7 tools through an in-process MCP client on generated images in a temporary folder, launches the real stdio server as a child process, checks originals are byte-identical, and prints one PASS/WARN/FAIL line per check (no absolute paths). Exit 0 = usable. Needs no `--root`.
+- `docs/install-termux.md`: phone install guide (F-Droid Termux, prebuilt `python-pillow`/`python-cryptography`, Rust build fallback for `pydantic-core`/`rpds-py`, self-test, troubleshooting table). VERIFY on a real phone.
+- `docs/release-checklist.md` and draft release notes `docs/releases/v0.8.0.md`.
+- 6 new tests (195 total) in `tests/unit/test_selftest.py`.
+
+### Changed
+- `docs/clients.md`: Termux step also installs `python-cryptography`, runs `--self-test` and links the install guide; Gemini tool count corrected to 7.
+
 ## [0.7.0] - 2026-10-20
 
 ### Added

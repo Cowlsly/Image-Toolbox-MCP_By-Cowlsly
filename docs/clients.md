@@ -21,13 +21,16 @@ Everything stays on the phone: the CLI starts `imagetoolbox-mcp` as a child proc
 ### 1. Install the server (VERIFY)
 
 ```sh
-pkg update && pkg install python python-pillow git
+pkg update && pkg install python python-pillow python-cryptography git
 termux-setup-storage                 # allow Termux to see your photos; creates ~/storage/...
 pip install "git+https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly@root"
 imagetoolbox-mcp --version
+imagetoolbox-mcp --self-test          # should end with SELF-TEST PASSED
 ```
 
-If `pip` fails while building `pydantic-core` (a Rust package), run `pkg install rust` and retry, and please report it — this is open item 5 in the roadmap.
+Full install guide with troubleshooting (Rust build step, codecs): [install-termux.md](install-termux.md).
+
+If `pip` fails while building `pydantic-core` or `rpds-py` (Rust packages), run `pkg install rust binutils build-essential` and retry, and please send the `--self-test` output — this is roadmap item 13.
 
 Choose **one** folder the server may read, for example `~/storage/pictures` (Android "Pictures"). Results go to `imagetoolbox-out/` inside it. Avoid pointing it at all of `~/storage/shared`.
 
@@ -61,7 +64,7 @@ Install with `pkg install nodejs` then `npm install -g @google/gemini-cli`. Comm
 }
 ```
 
-(Use the full path in JSON — `~` is not expanded there.) Run `gemini`, then `/mcp` to check that 6 tools are listed.
+(Use the full path in JSON — `~` is not expanded there.) Run `gemini`, then `/mcp` to check that 7 tools are listed.
 
 ### Limitations on Path A
 
@@ -81,7 +84,7 @@ OpenAI's help centre (checked 2026-10-17) says full MCP connectors are available
 
 ## Protocol compatibility (tested)
 
-`tests/integration/test_protocol.py` starts the real server over stdio and sends raw JSON-RPC `initialize`: protocol versions **2024-11-05, 2025-03-26, 2025-06-18 and 2025-11-25 are echoed back** and all 6 tools are listed; an unknown version is answered with a supported one (2025-11-25 with SDK 2.2.0). Older and newer clients therefore both connect.
+`tests/integration/test_protocol.py` starts the real server over stdio and sends raw JSON-RPC `initialize`: protocol versions **2024-11-05, 2025-03-26, 2025-06-18 and 2025-11-25 are echoed back** and all tools are listed; an unknown version is answered with a supported one (2025-11-25 with SDK 2.2.0). Older and newer clients therefore both connect.
 
 ## Sources (checked 2026-10-17)
 
