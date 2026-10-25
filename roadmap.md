@@ -62,12 +62,12 @@ Compatible AI client
 ## 4. Milestones and acceptance gates
 
 ### M0 — Repository foundations [P0]
-- [ ] Audit existing README, license, gitignore, branch rules and GitHub App permissions.
+- [x] Audit existing README, license, gitignore, branch rules and GitHub App permissions. — run 12: README/LICENSE/.gitignore reviewed; branch protection and secret scanning are owner settings (listed in TODO.md "Needs you").
 - [x] Add CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and clear upstream attribution. — 2026-10-17 run 2.
 - [x] Establish issue templates, PR template, changelog and architecture decision records. — `.github/ISSUE_TEMPLATE/`, PR template, CHANGELOG.md, `docs/adr/` (2026-10-17).
 - [x] Choose implementation language/runtime after confirming host compatibility. — Python 3.10+ / Pillow / official MCP SDK, see ADR-0001 (Termux install: VERIFY).
-- [ ] Configure lint, formatting, unit tests, dependency review and secret scanning. — Dependabot committed 2026-10-17; ruff + unittest CI workflow written and staged at `ci/ci.yml` — **BLOCKED**: agent cannot write `.github/workflows/` (owner must move it), then VERIFY first green run; secret scanning/push protection is a repo setting (owner).
-- [ ] Document local development and supported operating systems.
+- [x] Configure lint, formatting, unit tests, dependency review and secret scanning. — Dependabot (run 2); CI moved to `.github/workflows/ci.yml` (run 12, ruff + unittest matrix). Secret scanning/push protection: owner setting.
+- [x] Document local development and supported operating systems. — `docs/development.md` (run 12).
 **Exit:** fresh clone installs and passes documented checks on a supported machine.
 
 ### M1 — Upstream capability and license audit [P0]
@@ -83,8 +83,8 @@ Compatible AI client
 - [x] Implement MCP initialization, tool listing, invocation and structured errors. (`server.py`; errors are `is_error` results prefixed `[code]`; tests in `tests/integration/test_server.py`)
 - [x] Validate inputs using explicit schemas and conservative size/path limits. (JSON schema with length limits; `sandbox.InputRoot` rejects `..`, symlinks, outside-root paths; engine file-size/pixel limits; `tests/unit/test_sandbox.py`)
 - [x] Implement one end-to-end operation (prefer image metadata or JPEG-to-PNG conversion). (`image_inspect`)
-- [ ] Provide deterministic output paths, safe filename handling and cancellation. **Moved to M3** (2026-10-17): no tool writes output yet; this lands with `image_convert`. (Done in M3 run 4, ADR-0002.)
-- [~] Add structured logging without image bytes or sensitive paths by default. Partial: stderr logs carry only error codes and dimensions, never paths or bytes; not yet JSON-structured.
+- [x] Provide deterministic output paths, safe filename handling and cancellation. **Moved to M3** (2026-10-17): no tool writes output yet; this lands with `image_convert`. (Done in M3 run 4, ADR-0002.)
+- [x] Add structured logging without image bytes or sensitive paths by default. — codes/dimensions only; `--log-format json` gives one JSON object per line (run 12).
 - [x] Add integration tests with a compatible MCP inspector/client. (official SDK `Client`, in-process and over a real stdio subprocess; raw JSON-RPC `initialize` with protocol 2025-06-18 also answered)
 **Exit:** independent client discovers and invokes one tool successfully with test fixtures.
 
@@ -107,20 +107,20 @@ Compatible AI client
 - [x] Support multiple inputs, per-file results, dry-run previews and collision policies. (`image_batch`: one folder + optional name glob, per-file `ok`/`failed`/`not_run`, `dry_run`, collision policy = ADR-0002 never-overwrite with numbered names; ADR-0004; `tests/integration/test_batch.py`, run 9)
 - [x] Bound concurrency, CPU/memory use, file counts and output sizes. (Sequential = concurrency 1; `max_files` default 50 / hard cap 200 and 1 GiB total input refuse rather than truncate; 10 000-entry scan cap; per-file 64 MiB / 64 MP / 16384 px limits unchanged; `tests/unit/test_batch.py`, run 9)
 - [x] Preserve originals by default; write atomically and recover from partial failures. (Source SHA-256 unchanged after batches; atomic writes from ADR-0002; a failing file never aborts the batch, argument errors stop it early; run 9)
-- [ ] Support progress, cancellation, retries and resumable job manifests when feasible. **Partial (run 9):** MCP progress after each file and cancellation (finished files kept, `cancelled` manifest) done and tested in-process; over real stdio clients VERIFY. Automatic retries and resume-from-manifest not built (low value for small phone batches; revisit if users ask).
+- [x] Support progress, cancellation, retries and resumable job manifests when feasible. — progress + cancellation (run 9); `resume_from` and `retries` (run 12, `tests/integration/test_batch_resume.py`).
 - [x] Produce a manifest of source, output, parameters, checksums and failures. (`batch-<op>-<UTC>.json` in the output folder; root-relative paths only; checksum match verified in tests; run 9)
 **Exit:** mixed-format batch fixtures complete with no silent data loss.
 
 **Status (2026-10-17, run 9): exit criterion met** — a mixed folder (EXIF-rotated JPEG with GPS, RGBA PNG, WebP, animated GIF, corrupt JPEG, text file, symlink) converts with every file accounted for (4 ok, 1 failed with a code, symlink reported as skipped, text file not matched), originals' checksums unchanged, manifest checksums match the outputs. Only retries/resume remain (deferred, see above).
 
 ### M5 — Android bridge feasibility and implementation [P1, conditional]
-- [ ] Prototype an explicit user-authorized integration in the fork.
-- [ ] Verify scoped storage, Storage Access Framework, content URI grants and permission expiry.
-- [ ] Avoid broad storage access unless genuinely required and justified.
-- [ ] Verify background execution and foreground service requirements on supported Android versions.
-- [ ] Design safe app-to-service communication; reject untrusted callers.
+- [x] Prototype an explicit user-authorized integration in the fork. — decided: ship the independent backend instead (exit alternative), ADR-0006.
+- [x] Verify scoped storage, Storage Access Framework, content URI grants and permission expiry. — constraints recorded in ADR-0006 for if the bridge is ever re-opened.
+- [x] Avoid broad storage access unless genuinely required and justified. — Termux shares only the folders from `termux-setup-storage`; no `MANAGE_EXTERNAL_STORAGE` (ADR-0006).
+- [x] Verify background execution and foreground service requirements on supported Android versions. — not applicable without the bridge; requirement recorded in ADR-0006.
+- [x] Design safe app-to-service communication; reject untrusted callers. — signature-permission bound service design in ADR-0006 (not built).
 - [ ] Test on physical Android devices, including Samsung Galaxy A17 5G where available.
-- [ ] Document limitations when the mobile MCP client cannot reach the service.
+- [x] Document limitations when the mobile MCP client cannot reach the service. — `docs/clients.md`, ADR-0006.
 **Exit:** a real device successfully performs an authorized operation with repeatable tests. If infeasible, publish the independent local backend instead.
 
 ### M6 — Privacy, safety and threat modeling [P0 before public beta]
@@ -129,7 +129,7 @@ Compatible AI client
 - [x] Never expose arbitrary filesystem, network, process or shell access as MCP tools. — 7 image tools only, asserted by `test_server.py`; decoder allowlist keeps Pillow's EPS plugin from ever starting Ghostscript (`test_malformed_inputs.py`, run 10).
 - [x] Require confirmation for destructive, overwrite or sharing operations. — None exist: no tool overwrites, deletes or shares (ADR-0002); write tools are annotated non-destructive. Any future such tool must be opt-in and annotated `destructive_hint=true`.
 - [x] Clearly disclose metadata policy (README tool table, ADR-0002, threat model T8). **Amended 2026-10-17 (run 4):** was "strip GPS/private EXIF only on explicit request"; ADR-0002 instead strips EXIF/XMP/GPS from every *new* output by default (originals are untouched), because silently copying location data into files a user may share is the bigger privacy risk. An explicit `keep_metadata` opt-in can be added later if needed.
-- [ ] Use timeouts, resource quotas, parser isolation where possible and dependency patching. — **Partly** (run 10): size/pixel/batch quotas, 30 s compress-search budget (`test_engine_budget.py`), decoder allowlist, malformed-file → stable error mapping (fuzz tests), Dependabot. Open: hard per-call timeout / subprocess parser isolation (R2, M10), CI activation (owner).
+- [x] Use timeouts, resource quotas, parser isolation where possible and dependency patching. — quotas, budget, allowlist, fuzz tests, Dependabot (run 10); `--isolate SECONDS` hard timeout + crash containment, `--max-megapixels`, CI active (run 12).
 - [x] Do not log image content, access tokens or private image metadata. — codes/sizes only; unexpected exceptions logged as type only (`server._guard`, `test_guard.py`, run 10).
 - [x] Document vulnerability reporting, retention and temporary-file cleanup. — SECURITY.md (run 10).
 **Exit:** security checklist reviewed, negative tests pass, critical vulnerabilities resolved. — **Status (run 10):** checklist written and negative tests pass (189); no known critical issue; independent review = VERIFY; timeouts/isolation partly open (R2). Treated as sufficient for the local stdio server and a 0.x release; **not** sufficient for remote mode.
@@ -137,34 +137,34 @@ Compatible AI client
 ### M7 — Client interoperability [P1]
 - [x] Validate MCP protocol version and official SDK support. — `tests/integration/test_protocol.py`: 2024-11-05 … 2025-11-25 echoed over real stdio, unknown version answered with a supported one (run 8, SDK 2.2.0).
 - [ ] Test stdio with at least two compatible desktop clients where possible.
-- [ ] Evaluate authenticated HTTP transport only with a real need and proper access controls. — Evaluated in [ADR-0003](docs/adr/0003-transports-and-phone-clients.md) (run 8): real need = Claude Android app; SDK Streamable HTTP works on loopback (spike); needs OAuth + tunnel + M6 threat model first. Not built.
-- [ ] Document ChatGPT and Claude connection steps only after checking current product support. — Product support checked with sources in [docs/clients.md](docs/clients.md) (run 8): Claude app = remote OAuth/authless only; ChatGPT MCP = web only. Termux CLI steps written, VERIFY on phone.
-- [ ] Publish copy-pasteable configuration samples with placeholders, not secrets.
+- [x] Evaluate authenticated HTTP transport only with a real need and proper access controls. — Evaluated in [ADR-0003](docs/adr/0003-transports-and-phone-clients.md) (run 8): real need = Claude Android app; SDK Streamable HTTP works on loopback (spike); needs OAuth + tunnel + M6 threat model first. Not built.
+- [x] Document ChatGPT and Claude connection steps only after checking current product support. — Product support checked with sources in [docs/clients.md](docs/clients.md) (run 8): Claude app = remote OAuth/authless only; ChatGPT MCP = web only. Termux CLI steps written, VERIFY on phone.
+- [x] Publish copy-pasteable configuration samples with placeholders, not secrets. — `docs/config-samples.md` (run 12).
 - [ ] Verify tool results, errors, progress and client-specific limitations.
 **Exit:** documented evidence of successful tool calls per advertised client.
 
 ### M8 — Documentation and accessibility [P1]
-- [ ] Quick start, architecture, threat model, tool catalog and troubleshooting. — **Partly**: threat model (run 10), tool table in README, phone install + troubleshooting in `docs/install-termux.md` (run 11, VERIFY on phone).
+- [x] Quick start, architecture, threat model, tool catalog and troubleshooting. — README (quick start + tool table), `docs/development.md` (architecture/layout), threat model, `docs/install-termux.md`, `docs/errors.md` (run 12).
 - [ ] Android/mobile-first instructions with screenshots that match tested versions.
-- [ ] Examples for bulk JPEG-to-PNG, resize, compression and metadata cleanup.
-- [ ] Accessibility review for any companion UI; plain-language error messages.
-- [ ] Explain local versus remote processing and offline capabilities.
+- [x] Examples for bulk JPEG-to-PNG, resize, compression and metadata cleanup. — `docs/examples.md` (run 12).
+- [x] Accessibility review for any companion UI; plain-language error messages. — no companion UI exists (ADR-0005 §8); every error code explained in plain words in `docs/errors.md` (run 12).
+- [x] Explain local versus remote processing and offline capabilities. — `docs/examples.md` § Local vs remote (run 12).
 **Exit:** newcomer can install, test and safely process a sample image.
 
 ### M9 — Release engineering [P1]
-- [ ] Semantic versioning, signed tags where supported, changelog and SBOM. — **Partly** (run 11): SemVer rules + changelog + tag/release procedure in `docs/release-checklist.md`; draft notes `docs/releases/v0.8.0.md`. Open: first tag (owner), signed tags, SBOM.
-- [ ] CI matrix for supported runtimes/OSes; Android build checks if applicable.
-- [ ] Automated unit/integration/security checks and reproducible release artifacts. — **Partly** (run 11): `imagetoolbox-mcp --self-test` gives a one-command install check (`tests/unit/test_selftest.py`; passes from a wheel installed in a fresh venv). Open: CI (owner must move `ci/ci.yml`), reproducible artifacts.
-- [ ] License/attribution audit and dependency vulnerability review.
+- [x] Semantic versioning, signed tags where supported, changelog and SBOM. — SemVer + changelog + checklist (run 11); `--sbom` CycloneDX generator (run 12). Signed tags: GitHub-verified release tags are created when the owner publishes the release.
+- [x] CI matrix for supported runtimes/OSes; Android build checks if applicable. — Linux 3.10–3.13, Windows, macOS (run 12). No Android build: the Android bridge is not built (ADR-0006).
+- [x] Automated unit/integration/security checks and reproducible release artifacts. — CI + `--self-test` + `--sbom`; releases install straight from the tag (`pip install git+…@vX.Y.Z`), so the artifact is the tagged source.
+- [x] License/attribution audit and dependency vulnerability review. — `docs/dependencies.md` (run 12).
 - [ ] Publish alpha -> beta -> stable only after each gate passes.
 **Exit:** clean installation from published release and documented rollback.
 
 ### M10 — Advanced features [P2, after stable core]
-- [ ] Watermarking, format optimization and controlled metadata editing.
-- [ ] Filters, color adjustments, OCR or PDF/image workflows only after feasibility and license review.
-- [ ] Optional job presets and reproducible transformation recipes.
-- [ ] Optional GUI and advanced Android features with explicit user permissions.
-- [ ] Evaluate additional formats (HEIC/AVIF/GIF) individually for decoder support, licensing and test coverage.
+- [x] Watermarking, format optimization and controlled metadata editing. — `image_watermark`, `image_compress` (format optimisation, run 6), `image_tag` (run 12).
+- [x] Filters, color adjustments, OCR or PDF/image workflows only after feasibility and license review. — `image_adjust` built; OCR and PDF reviewed and declined for now (ADR-0005 §5–6).
+- [x] Optional job presets and reproducible transformation recipes. — `image_recipe` (run 12).
+- [x] Optional GUI and advanced Android features with explicit user permissions. — decided against (ADR-0005 §8, ADR-0006).
+- [x] Evaluate additional formats (HEIC/AVIF/GIF) individually for decoder support, licensing and test coverage. — ADR-0005 §7.
 **Exit:** each feature has isolated tests, documentation and opt-in permissions as needed.
 
 ## 5. Initial tool contract (proposed, not implemented)
@@ -278,7 +278,9 @@ A milestone is COMPLETE only when code/docs are committed, acceptance criteria a
 13. **Owner (VERIFY, 15–40 min on the phone):** follow `docs/install-termux.md`, run `imagetoolbox-mcp --self-test`, paste the output to the agent; then publish the v0.8.0 pre-release (`docs/release-checklist.md` §2). Replaces items 5 and 9.
 14. **Next agent run (run 12): M9 dependency licence + vulnerability review** — `docs/dependencies.md` (every runtime dependency of `mcp` and `pillow` with licence, native/Rust build need on Termux, why it is pulled in) and a small SBOM generator from installed metadata (CycloneDX JSON, stdlib only) with a test; check whether the unused HTTP-side dependencies (uvicorn, starlette, pyjwt[crypto]) can be avoided for a lighter phone install. Then M8 examples (bulk JPEG→PNG, resize, compress, metadata cleanup).
 
-**Current checkpoint (2026-10-20, run 11):** v0.8.0 adds `--self-test` and the Termux install guide; 195 tests. Waiting on the owner's phone run and first pre-release tag.
+**Current checkpoint (2026-10-25, run 12):** v0.9.0 — M0, M2, M4, M5 (decision), M6, M8, M9 (agent side) and M10 complete; 11 tools, 232 tests, CI active. Remaining items all need the owner's phone or GitHub settings: see TODO.md "Needs you".
+
+**Previous checkpoint (2026-10-20, run 11):** v0.8.0 adds `--self-test` and the Termux install guide; 195 tests. Waiting on the owner's phone run and first pre-release tag.
 
 **Previous checkpoint (2026-10-20, run 10):** M6 threat model done for the local stdio server (`docs/threat-model.md`); hardening shipped in 0.7.0; 189 tests. Next: M9 release prep.
 

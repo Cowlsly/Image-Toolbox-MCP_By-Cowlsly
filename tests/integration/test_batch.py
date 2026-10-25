@@ -64,7 +64,8 @@ class BatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bt.input_schema["required"], ["operation"])
         props = bt.input_schema["properties"]
         self.assertEqual(
-            props["operation"]["enum"], ["convert", "resize", "compress", "rotate_flip", "crop"]
+            props["operation"]["enum"],
+            ["convert", "resize", "compress", "rotate_flip", "crop", "adjust", "watermark"],
         )
         self.assertNotIn("ctx", props)
         self.assertEqual(props["max_files"]["maximum"], 200)

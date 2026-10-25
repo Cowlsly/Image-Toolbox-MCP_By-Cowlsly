@@ -4,6 +4,21 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-25
+
+### Added
+- M10 tools: `image_adjust`, `image_watermark`, `image_recipe` (reproducible multi-step, one encode) and `image_tag` (controlled description/artist/copyright metadata). `adjust` and `watermark` are also `image_batch` operations. ADR-0005.
+- `image_batch`: `resume_from` (skip files an earlier manifest finished, same options, unchanged source) and `retries` (0–3 for temporary failures); new item status `resumed` and result field `resumed`.
+- `--isolate SECONDS` / `IMAGETOOLBOX_MCP_ISOLATE`: every engine call in a spawned child process with a hard timeout (`[timed_out]`); a decoder crash becomes `[decode_failed]`.
+- `--max-megapixels MP`, `--log-format json` (one JSON object per line on stderr) and `--sbom` (CycloneDX 1.5 JSON from installed metadata, no network).
+- Docs: `docs/development.md`, `docs/dependencies.md` (licence + native-build review), `docs/examples.md` (incl. local vs remote), `docs/config-samples.md`, `docs/errors.md`, ADR-0005 (advanced features, OCR/PDF/HEIC/AVIF decisions), ADR-0006 (Android bridge: ship the independent backend).
+- CI workflow moved to `.github/workflows/ci.yml` (was staged at `ci/ci.yml`).
+- 37 new tests (232 total).
+
+### Changed
+- Input files are opened with a confined `openat` walk from the input root (threat model R1 closed on POSIX).
+- Tool count 7 → 11; self-test exercises all 11.
+
 ## [0.8.0] - 2026-10-20
 
 ### Added

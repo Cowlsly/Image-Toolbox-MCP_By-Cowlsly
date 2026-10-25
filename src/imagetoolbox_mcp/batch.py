@@ -52,7 +52,7 @@ MAX_BATCH_INPUT_BYTES = 1024 * 1024 * 1024  # 1 GiB of source files per call
 MAX_SCAN_ENTRIES = 10_000  # folder entries looked at before giving up
 MAX_PATTERN_CHARS = 100
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"})
-OPERATIONS = ("convert", "resize", "compress", "rotate_flip", "crop")
+OPERATIONS = ("convert", "resize", "compress", "rotate_flip", "crop", "adjust", "watermark")
 
 Fmt = Literal["jpeg", "png", "webp"]
 
@@ -135,12 +135,59 @@ class CropOptions(_Opts):
         return self
 
 
+class AdjustOptions(_Opts):
+    brightness: float | None = Field(None, ge=0, le=4)
+    contrast: float | None = Field(None, ge=0, le=4)
+    saturation: float | None = Field(None, ge=0, le=4)
+    sharpness: float | None = Field(None, ge=0, le=4)
+    grayscale: bool = False
+    autocontrast: bool = False
+    format: Fmt | None = None
+    quality: int = Field(DEFAULT_QUALITY, ge=1, le=100)
+    lossless: bool = False
+
+    @model_validator(mode="after")
+    def _check(self):
+        factors = [self.brightness, self.contrast, self.saturation, self.sharpness]
+        if (
+            not self.grayscale
+            and not self.autocontrast
+            and all(f is None or f == 1.0 for f in factors)
+        ):
+            raise ValueError("nothing to do: give a factor, grayscale or autocontrast")
+        return self
+
+
+class WatermarkOptions(_Opts):
+    text: str = Field(min_length=1, max_length=120)
+    position: Literal[
+        "top-left",
+        "top",
+        "top-right",
+        "left",
+        "center",
+        "right",
+        "bottom-left",
+        "bottom",
+        "bottom-right",
+    ] = "bottom-right"
+    opacity: float = Field(0.5, gt=0, le=1)
+    size_percent: float = Field(5.0, ge=1, le=50)
+    color: str = Field("#ffffff", max_length=32)
+    margin_percent: float = Field(2.0, ge=0, le=25)
+    format: Fmt | None = None
+    quality: int = Field(DEFAULT_QUALITY, ge=1, le=100)
+    lossless: bool = False
+
+
 OPTION_MODELS: dict[str, type[_Opts]] = {
     "convert": ConvertOptions,
     "resize": ResizeOptions,
     "compress": CompressOptions,
     "rotate_flip": RotateFlipOptions,
     "crop": CropOptions,
+    "adjust": AdjustOptions,
+    "watermark": WatermarkOptions,
 }
 
 
@@ -311,6 +358,14 @@ def run_one(
         return rotate_flip_image(src, out, None, target=target, limits=limits, **o)
     if operation == "crop":
         return crop_image(src, out, None, target=target, limits=limits, **o)
+    if operation == "adjust":
+        from .edit import adjust_image
+
+        return adjust_image(src, out, None, target=target, limits=limits, **o)
+    if operation == "watermark":
+        from .edit import watermark_image
+
+        return watermark_image(src, out, None, target=target, limits=limits, **o)
     raise EngineError("invalid_argument", f"operation must be one of {list(OPERATIONS)}.")
 
 
@@ -324,3 +379,65 @@ def write_batch_manifest(out: OutputDir, operation: str, record: dict) -> Path:
     payload = {"tool": "imagetoolbox-mcp", "version": __version__, **record}
     data = (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     return out.write_new(manifest_stem(operation), "json", lambda fh: fh.write(data))
+
+
+# --- resume (M4 follow-up) ----------------------------------------------------------------
+
+MAX_MANIFEST_BYTES = 5 * 1024 * 1024
+RETRYABLE_CODES = frozenset({"output_unavailable", "out_of_memory", "internal_error"})
+MAX_RETRIES = 3
+
+
+def load_resume(out: OutputDir, name: str, operation: str, opts: _Opts) -> dict[str, dict]:
+    """Read a previous manifest from the output folder for ``resume_from``.
+
+    ``name`` must be a bare file name (no folders) of a manifest this tool wrote, for the
+    same operation and the same options. Returns ``{source: record}`` for the files that run
+    finished with status ``ok``. Anything else is ``[invalid_argument]``.
+    """
+    if not isinstance(name, str) or not name or "/" in name or "\\" in name or name[0] == ".":
+        raise EngineError(
+            "invalid_argument",
+            "resume_from must be the file name of a manifest in the output folder, "
+            "e.g. 'batch-convert-20261025T010203Z.json'.",
+        )
+    if not name.endswith(".json"):
+        raise EngineError("invalid_argument", "resume_from must name a .json manifest.")
+    p = out.path / name
+    try:
+        st = os.lstat(p)
+    except FileNotFoundError:
+        raise EngineError("not_found", "That manifest is not in the output folder.") from None
+    except OSError:
+        raise EngineError("permission_denied", "The manifest cannot be read.") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise EngineError("symlink_rejected", "The manifest must be a regular file.")
+    if st.st_size > MAX_MANIFEST_BYTES:
+        raise EngineError("file_too_large", "The manifest is too large to resume from.")
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise EngineError("invalid_argument", "The manifest is not valid JSON.") from None
+    if not isinstance(data, dict) or data.get("tool") != "imagetoolbox-mcp":
+        raise EngineError("invalid_argument", "That file is not an imagetoolbox-mcp manifest.")
+    if data.get("operation") != operation:
+        raise EngineError(
+            "invalid_argument",
+            f"The manifest is for '{data.get('operation')}', not '{operation}'.",
+        )
+    if data.get("options") != opts.model_dump():
+        raise EngineError(
+            "invalid_argument",
+            "The manifest used different options; resume only works with the same options.",
+        )
+    done: dict[str, dict] = {}
+    for item in data.get("items") or []:
+        if (
+            isinstance(item, dict)
+            and item.get("status") in ("ok", "resumed")
+            and isinstance(item.get("source"), str)
+            and isinstance(item.get("source_sha256"), str)
+            and isinstance(item.get("output"), str)
+        ):
+            done[item["source"]] = item
+    return done
