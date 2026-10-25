@@ -2,7 +2,7 @@
 
 Releases are `0.x` alphas until the gates in [roadmap.md](../roadmap.md) §4 M9 pass. Version lives only in `src/imagetoolbox_mcp/__init__.py` (`__version__`); `pyproject.toml` reads it.
 
-Who does what: the agent prepares everything up to "Owner" steps; tags and GitHub releases are made by the owner (the agent's GitHub connector cannot create tags or releases, and `git push` from the agent sandbox is denied).
+Who does what: the agent prepares everything up to "Owner" steps. Since 2026-10-25 the agent can `git push` (including tags); publishing the GitHub release (and deciding *when* a 0.x becomes 1.0) stays with the owner, because it needs the phone self-test first.
 
 ## 1. Before tagging (agent)
 

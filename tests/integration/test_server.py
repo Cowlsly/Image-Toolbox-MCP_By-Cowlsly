@@ -53,13 +53,17 @@ class InProcessServerTests(_Fixtures):
         self.assertEqual(
             sorted(t.name for t in tools),
             [
+                "image_adjust",
                 "image_batch",
                 "image_compress",
                 "image_convert",
                 "image_crop",
                 "image_inspect",
+                "image_recipe",
                 "image_resize",
                 "image_rotate_flip",
+                "image_tag",
+                "image_watermark",
             ],
         )
         tool = next(t for t in tools if t.name == "image_inspect")
@@ -135,13 +139,17 @@ class StdioSubprocessTests(_Fixtures):
             self.assertEqual(
                 sorted(names),
                 [
+                    "image_adjust",
                     "image_batch",
                     "image_compress",
                     "image_convert",
                     "image_crop",
                     "image_inspect",
+                    "image_recipe",
                     "image_resize",
                     "image_rotate_flip",
+                    "image_tag",
+                    "image_watermark",
                 ],
             )
             r = await c.call_tool("image_inspect", {"path": "b.jpg"})

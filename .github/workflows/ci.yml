@@ -1,8 +1,3 @@
-# STAGED WORKFLOW — not active here. GitHub only runs workflows under .github/workflows/.
-# The automated agent cannot write that folder (connector lacks the "workflows" permission).
-# To activate: open this file on github.com, tap Edit (pencil), change the path to
-# .github/workflows/ci.yml, and commit. Then delete this comment block.
-
 name: CI
 
 on:

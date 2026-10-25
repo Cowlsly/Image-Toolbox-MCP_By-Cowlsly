@@ -2,7 +2,7 @@
 
 An open-source Model Context Protocol (MCP) integration for Image Toolbox, enabling AI assistants to access image conversion, editing, compression, metadata, and batch-processing workflows. Developed by Cowlsly as an independent integration with attribution to the original project.
 
-> **Status: early development.** A minimal MCP server works with seven tools: `image_inspect` (read-only), `image_convert` (JPEG/PNG/WebP), `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop` and `image_batch` (one operation on a whole folder). See [roadmap.md](roadmap.md) and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+> **Status: 0.9.0 pre-release.** Eleven tools: `image_inspect` (read-only), `image_convert` (JPEG/PNG/WebP), `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_adjust`, `image_watermark`, `image_recipe`, `image_tag` and `image_batch` (one operation on a whole folder, resumable). Waiting only on a real-phone install check before 1.0. See [roadmap.md](roadmap.md) and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
 
 ## Attribution
 
@@ -22,7 +22,11 @@ You choose **one input folder**; the server can only read images inside it. Path
 | `image_compress` | Make a file smaller. JPEG/WebP: `quality` (default 80) **or** `max_bytes` — the highest quality in `min_quality`…95 that fits is found by binary search. PNG stays lossless (optimised) unless `colors` (2–256) or `max_bytes` asks for palette reduction (largest of 256/128/…/2 colours that fits). Reports `input_bytes`, `output_bytes`, `saved_bytes`, `quality_used`/`colors_used`, `target_met`; warns `target_not_met` (smallest attempt kept) and `larger_than_source`. Keeps the source format unless `format` is set. Default name `<source>-compressed`. Tip: for photos prefer JPEG/WebP; PNG `max_bytes` on big photos is slow (≈15 s for 6 MP in the cloud test, slower on a phone). |
 | `image_rotate_flip` | `rotate` 90/180/270 degrees **clockwise** and/or `flip` `horizontal` (mirror) / `vertical`; rotation happens first. Directions refer to the photo as displayed (EXIF rotation applied first). Pixel moves are exact; JPEG/lossy-WebP output is re-encoded (warning `lossy_reencode` — use `format: png` for an exact copy). Default name `<source>-rot90-flipH`. |
 | `image_crop` | Either a box — `width`, `height`, optional `left`/`top` (default 0) in pixels of the displayed image — or only `aspect` (`"1:1"`, `"16:9"`…) for the largest centred crop. Boxes outside the image are refused with `[crop_out_of_bounds]` and the real size (never silently clamped). Same format/metadata rules as resize. Default name `<source>-crop-<W>x<H>`. |
-| `image_batch` | Apply one `operation` (`convert`, `resize`, `compress`, `rotate_flip`, `crop`) with its `options` (same as the single tool, no `path`/`output_name`) to every image directly inside `folder` (no sub-folders; optional name `pattern` like `*.jpg`). One file at a time; a failing file is reported and the rest continue. `dry_run: true` only lists the files. Refuses (instead of truncating) more than `max_files` (default 50, max 200) or 1 GiB in total. Writes a JSON manifest (options, sources, outputs, SHA-256 checksums, failures) to the output folder. Sends progress; on cancel, finished files are kept and recorded. Rules: [ADR-0004](docs/adr/0004-batch-processing.md). |
+| `image_adjust` | `brightness`, `contrast`, `saturation`, `sharpness` as factors (1.0 = unchanged, 0–4), `grayscale`, `autocontrast`. Transparency kept. Default name `<source>-adjusted`. |
+| `image_watermark` | One line of `text` (≤ 120 chars) at one of 9 `position`s, `opacity` 0–1, `size_percent` of the shorter side, `color`, `margin_percent`. Default name `<source>-wm`. |
+| `image_recipe` | Up to 10 `steps` (`resize`, `crop`, `rotate_flip`, `adjust`, `watermark`) applied in memory with **one** encode. Returns the normalised steps so the same recipe can be re-run exactly. Default name `<source>-recipe`. |
+| `image_tag` | New copy whose only metadata is the `description`, `artist` and/or `copyright` you give (EXIF for JPEG/WebP, text chunks for PNG); GPS and camera data still removed. Default name `<source>-tagged`. |
+| `image_batch` | Apply one `operation` (`convert`, `resize`, `compress`, `rotate_flip`, `crop`, `adjust`, `watermark`) with its `options` (same as the single tool, no `path`/`output_name`) to every image directly inside `folder` (no sub-folders; optional name `pattern` like `*.jpg`). One file at a time; a failing file is reported and the rest continue. `dry_run: true` only lists the files. Refuses (instead of truncating) more than `max_files` (default 50, max 200) or 1 GiB in total. Writes a JSON manifest (options, sources, outputs, SHA-256 checksums, failures) to the output folder. Sends progress; on cancel, finished files are kept and recorded. `resume_from: "<manifest>.json"` skips files that run finished; `retries` (0–3) retries temporary failures. Rules: [ADR-0004](docs/adr/0004-batch-processing.md). |
 
 Input formats: JPEG (incl. multi-picture MPO), PNG, WebP, GIF, TIFF, BMP — anything else is refused with `[unsupported_format]`. Security design and known limits: [`docs/threat-model.md`](docs/threat-model.md).
 
@@ -34,6 +38,8 @@ Run it (an MCP client normally launches this for you):
 imagetoolbox-mcp --root ~/Pictures        # or: IMAGETOOLBOX_MCP_ROOT=~/Pictures imagetoolbox-mcp
 imagetoolbox-mcp --root ~/Pictures --out ~/Pictures/converted   # optional output folder (or IMAGETOOLBOX_MCP_OUT)
 ```
+
+Useful options: `--isolate SECONDS` (each operation in a child process with a hard time limit), `--max-megapixels MP` (lower memory use), `--log-format json`, `--sbom` (print a CycloneDX SBOM). Examples: [docs/examples.md](docs/examples.md); client configs: [docs/config-samples.md](docs/config-samples.md); error codes: [docs/errors.md](docs/errors.md).
 
 Using it from an Android phone (Termux + Claude Code or Gemini CLI), and why the Claude/ChatGPT apps can't connect yet: [docs/clients.md](docs/clients.md).
 
@@ -51,7 +57,7 @@ python -m unittest discover -s tests -t .
 imagetoolbox-mcp --version
 ```
 
-Lint: `ruff check src tests && ruff format --check src tests`.
+Lint: `ruff check src tests && ruff format --check src tests`. Full developer guide and supported platforms: [docs/development.md](docs/development.md). Dependencies and licences: [docs/dependencies.md](docs/dependencies.md).
 
 Termux (Android): step-by-step guide in [docs/install-termux.md](docs/install-termux.md) (VERIFY on a real phone). Check any install with `imagetoolbox-mcp --self-test` — it runs every tool on generated images in a temporary folder and prints PASS/FAIL per check. More in [CONTRIBUTING.md](CONTRIBUTING.md); security reports: [SECURITY.md](SECURITY.md).
 

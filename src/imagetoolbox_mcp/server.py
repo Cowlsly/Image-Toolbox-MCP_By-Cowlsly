@@ -11,10 +11,12 @@ Every path is resolved through :class:`~imagetoolbox_mcp.sandbox.InputRoot`.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import inspect
 import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Annotated, Any, Literal
 
 import anyio
@@ -29,11 +31,27 @@ from .batch import (
     DEFAULT_BATCH_FILES,
     MAX_BATCH_FILES,
     MAX_PATTERN_CHARS,
+    MAX_RETRIES,
+    RETRYABLE_CODES,
+    load_resume,
     parse_options,
     run_one,
     select_files,
     sha256_file,
     write_batch_manifest,
+)
+from .edit import (
+    MAX_FACTOR,
+    MAX_RECIPE_STEPS,
+    MAX_TAG_CHARS,
+    MAX_WATERMARK_CHARS,
+    MIN_FACTOR,
+    POSITIONS,
+    RECIPE_STEPS,
+    adjust_image,
+    recipe_image,
+    tag_image,
+    watermark_image,
 )
 from .engine import (
     DEFAULT_LIMITS,
@@ -51,10 +69,27 @@ from .engine import (
     resize_image,
     rotate_flip_image,
 )
+from .isolation import isolated
 from .output import DEFAULT_DIRNAME, MAX_STEM_CHARS, OutputDir, default_stem
 from .sandbox import MAX_PATH_CHARS, InputRoot
 
 log = logging.getLogger("imagetoolbox_mcp")
+
+# Engine entry points that may be process-isolated. ``build_server`` looks each up by name in
+# this module's globals at build time (so tests can patch them here) and wraps it.
+_ENGINE_OPS = (
+    inspect_image,
+    convert_image,
+    resize_image,
+    compress_image,
+    rotate_flip_image,
+    crop_image,
+    adjust_image,
+    watermark_image,
+    recipe_image,
+    tag_image,
+    run_one,
+)
 
 SERVER_NAME = "imagetoolbox-mcp"
 
@@ -153,11 +188,58 @@ class CropResult(ResizeResult):
     crop_top: int = Field(description="Top edge of the crop box in the upright source.")
 
 
+class AdjustResult(ConvertResult):
+    """Output schema of ``image_adjust``."""
+
+    brightness: float | None
+    contrast: float | None
+    saturation: float | None
+    sharpness: float | None
+    grayscale: bool
+    autocontrast: bool
+
+
+class WatermarkResult(ConvertResult):
+    """Output schema of ``image_watermark``."""
+
+    position: str
+    watermark_chars: int
+
+
+class RecipeResult(ResizeResult):
+    """Output schema of ``image_recipe``."""
+
+    steps: list[dict[str, Any]] = Field(
+        description="The normalised steps applied, in order. Pass them back to repeat exactly."
+    )
+
+
+class TagResult(ConvertResult):
+    """Output schema of ``image_tag``."""
+
+    tags_written: list[str] = Field(description="Which text fields were written.")
+
+
+Factor = Annotated[
+    float | None,
+    Field(ge=MIN_FACTOR, le=MAX_FACTOR, description="1.0 = unchanged, <1 less, >1 more."),
+]
+OutputName = Annotated[
+    str | None,
+    Field(
+        max_length=MAX_STEM_CHARS,
+        description="Optional file name WITHOUT extension. Letters, digits, space, "
+        "'.', '_' and '-' only.",
+    ),
+]
+TagText = Annotated[str | None, Field(max_length=MAX_TAG_CHARS)]
+
+
 class BatchItem(BaseModel):
     """One file of an ``image_batch`` run."""
 
     source: str = Field(description="Input path relative to the input folder.")
-    status: Literal["ok", "failed", "planned", "not_run"]
+    status: Literal["ok", "failed", "planned", "not_run", "resumed"]
     output: str | None = None
     input_bytes: int | None = None
     output_bytes: int | None = None
@@ -183,6 +265,7 @@ class BatchResult(BaseModel):
     dry_run: bool
     matched: int = Field(description="Files selected for processing.")
     succeeded: int
+    resumed: int = Field(0, description="Files already done by the resumed manifest's run.")
     failed: int
     not_run: int = Field(description="Files left untouched because the batch stopped early.")
     stopped_reason: str | None = Field(description="Why the batch stopped early, if it did.")
@@ -205,7 +288,11 @@ BATCH_DESCRIPTION = (
     "compress {quality | max_bytes, min_quality, colors, format}; "
     "rotate_flip {rotate (90|180|270, clockwise), flip (horizontal|vertical), format, "
     "quality, lossless}; "
-    "crop {left, top, width, height | aspect like '1:1', format, quality, lossless}. "
+    "crop {left, top, width, height | aspect like '1:1', format, quality, lossless}; "
+    "adjust {brightness, contrast, saturation, sharpness, grayscale, autocontrast, format, "
+    "quality, lossless}; "
+    "watermark {text (required), position, opacity, size_percent, color, margin_percent, "
+    "format, quality, lossless}. "
     "Without 'pattern', .jpg/.jpeg/.png/.webp/.gif/.bmp/.tif/.tiff files are used. A JSON "
     "manifest (sources, outputs, options, SHA-256 checksums, failures) is written unless "
     "write_manifest=false. EXIF/GPS metadata is removed from every output."
@@ -280,11 +367,19 @@ def build_server(
     limits: Limits = DEFAULT_LIMITS,
     log_level: str = "WARNING",
     out: OutputDir | None = None,
+    isolate_seconds: float | None = None,
 ) -> MCPServer:
     """Create a configured server. Separate from ``run`` so tests can connect in-process.
 
-    ``out`` defaults to ``<root>/imagetoolbox-out`` (ADR-0002).
+    ``out`` defaults to ``<root>/imagetoolbox-out`` (ADR-0002). ``isolate_seconds`` runs
+    every engine call in a child process killed after that many seconds (see isolation).
     """
+    # Confine every file open to the input root (openat walk, threat model R1).
+    limits = dataclasses.replace(limits, confine_to=str(root.path))
+    g = globals()
+    ops = SimpleNamespace(
+        **{f.__name__: isolated(g[f.__name__], isolate_seconds) for f in _ENGINE_OPS}
+    )
     if out is None:
         out = OutputDir(root.path / DEFAULT_DIRNAME)
     server = MCPServer(
@@ -324,7 +419,7 @@ def build_server(
     ) -> InspectResult:
         try:
             real = root.resolve(path)
-            info = inspect_image(real, limits)
+            info = ops.inspect_image(real, limits)
         except EngineError as err:
             # Log the code only; never the raw path (may contain personal names).
             log.info("image_inspect refused: %s", err.code)
@@ -377,7 +472,7 @@ def build_server(
         try:
             real = root.resolve(path)
             stem = output_name if output_name is not None else default_stem(real)
-            info = convert_image(
+            info = ops.convert_image(
                 real, format, out, stem, quality=quality, lossless=lossless, limits=limits
             )
         except EngineError as err:
@@ -452,7 +547,7 @@ def build_server(
     ) -> ResizeResult:
         try:
             real = root.resolve(path)
-            info = resize_image(
+            info = ops.resize_image(
                 real,
                 out,
                 output_name,
@@ -537,7 +632,7 @@ def build_server(
     ) -> CompressResult:
         try:
             real = root.resolve(path)
-            info = compress_image(
+            info = ops.compress_image(
                 real,
                 out,
                 output_name,
@@ -601,7 +696,7 @@ def build_server(
     ) -> RotateFlipResult:
         try:
             real = root.resolve(path)
-            info = rotate_flip_image(
+            info = ops.rotate_flip_image(
                 real,
                 out,
                 output_name,
@@ -674,7 +769,7 @@ def build_server(
     ) -> CropResult:
         try:
             real = root.resolve(path)
-            info = crop_image(
+            info = ops.crop_image(
                 real,
                 out,
                 output_name,
@@ -695,6 +790,211 @@ def build_server(
         log.info("image_crop ok: %sx%s", info["width"], info["height"])
         return CropResult(source=root.display(real), output=_display_output(root, dest), **info)
 
+    def _single(name, fn, real, output_name, **kw):
+        try:
+            info = fn(real, out, output_name, limits=limits, **kw)
+        except EngineError as err:
+            log.info("%s refused: %s", name, err.code)
+            raise _tool_error(err) from None
+        dest = info.pop("output_file")
+        log.info("%s ok: %sx%s", name, info["width"], info["height"])
+        return dict(source=root.display(real), output=_display_output(root, dest), **info)
+
+    def _resolve(path):
+        try:
+            return root.resolve(path)
+        except EngineError as err:
+            raise _tool_error(err) from None
+
+    @_tool(
+        server,
+        name="image_adjust",
+        title="Adjust colours",
+        description=(
+            "Change brightness, contrast, colour saturation or sharpness (each a factor: 1.0 "
+            "= unchanged, 0.5 = half, 1.5 = 50% more, range 0-4), turn the image grayscale, "
+            "or stretch its contrast automatically. Saves a NEW file in the output folder "
+            "(original never changed, never overwrites). Transparency is kept. EXIF/GPS "
+            "metadata is removed. Default name: '<source>-adjusted'."
+        ),
+        annotations=_write_hints,
+    )
+    def image_adjust(
+        path: SourcePath,
+        brightness: Factor = None,
+        contrast: Factor = None,
+        saturation: Factor = None,
+        sharpness: Factor = None,
+        grayscale: Annotated[bool, Field(description="Convert to grayscale.")] = False,
+        autocontrast: Annotated[
+            bool, Field(description="Stretch the darkest/lightest pixels to full range.")
+        ] = False,
+        format: OutFormat = None,
+        quality: Quality = DEFAULT_QUALITY,
+        lossless: Lossless = False,
+        output_name: OutputName = None,
+    ) -> AdjustResult:
+        real = _resolve(path)
+        return AdjustResult(
+            **_single(
+                "image_adjust",
+                ops.adjust_image,
+                real,
+                output_name,
+                brightness=brightness,
+                contrast=contrast,
+                saturation=saturation,
+                sharpness=sharpness,
+                grayscale=grayscale,
+                autocontrast=autocontrast,
+                target=format,
+                quality=quality,
+                lossless=lossless,
+            )
+        )
+
+    @_tool(
+        server,
+        name="image_watermark",
+        title="Add text watermark",
+        description=(
+            "Stamp one line of text (for example a copyright notice) onto an image and save "
+            "a NEW file in the output folder (original never changed, never overwrites). "
+            f"position is one of {list(POSITIONS)}; size_percent is the text height as a "
+            "percentage of the shorter side; opacity 0-1. EXIF/GPS metadata is removed. "
+            "Default name: '<source>-wm'."
+        ),
+        annotations=_write_hints,
+    )
+    def image_watermark(
+        path: SourcePath,
+        text: Annotated[
+            str, Field(min_length=1, max_length=MAX_WATERMARK_CHARS, description="One line.")
+        ],
+        position: Annotated[
+            Literal[
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "center",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right",
+            ],
+            Field(description="Where to place the text."),
+        ] = "bottom-right",
+        opacity: Annotated[float, Field(gt=0, le=1)] = 0.5,
+        size_percent: Annotated[float, Field(ge=1, le=50)] = 5.0,
+        color: Annotated[
+            str, Field(max_length=32, description="Text colour, e.g. '#ffffff' or 'black'.")
+        ] = "#ffffff",
+        margin_percent: Annotated[float, Field(ge=0, le=25)] = 2.0,
+        format: OutFormat = None,
+        quality: Quality = DEFAULT_QUALITY,
+        lossless: Lossless = False,
+        output_name: OutputName = None,
+    ) -> WatermarkResult:
+        real = _resolve(path)
+        return WatermarkResult(
+            **_single(
+                "image_watermark",
+                ops.watermark_image,
+                real,
+                output_name,
+                text=text,
+                position=position,
+                opacity=opacity,
+                size_percent=size_percent,
+                color=color,
+                margin_percent=margin_percent,
+                target=format,
+                quality=quality,
+                lossless=lossless,
+            )
+        )
+
+    @_tool(
+        server,
+        name="image_recipe",
+        title="Apply a multi-step recipe",
+        description=(
+            f"Apply up to {MAX_RECIPE_STEPS} steps to one image in memory and save ONE new "
+            "file (only one re-encode, so less quality loss than chaining tools). Each step "
+            f"is an object with 'op' in {list(RECIPE_STEPS)} plus that op's options: "
+            "resize {width, height, fit, resample, allow_upscale}; crop {left, top, width, "
+            "height | aspect}; rotate_flip {rotate, flip}; adjust {brightness, contrast, "
+            "saturation, sharpness, grayscale, autocontrast}; watermark {text, position, "
+            "opacity, size_percent, color, margin_percent}. The result repeats the "
+            "normalised steps so the recipe can be saved and re-run exactly. Original never "
+            "changed; EXIF/GPS removed. Default name: '<source>-recipe'."
+        ),
+        annotations=_write_hints,
+    )
+    def image_recipe(
+        path: SourcePath,
+        steps: Annotated[
+            list[dict[str, Any]],
+            Field(min_length=1, max_length=MAX_RECIPE_STEPS, description="Steps, in order."),
+        ],
+        format: OutFormat = None,
+        quality: Quality = DEFAULT_QUALITY,
+        lossless: Lossless = False,
+        output_name: OutputName = None,
+    ) -> RecipeResult:
+        real = _resolve(path)
+        return RecipeResult(
+            **_single(
+                "image_recipe",
+                ops.recipe_image,
+                real,
+                output_name,
+                steps=steps,
+                target=format,
+                quality=quality,
+                lossless=lossless,
+            )
+        )
+
+    @_tool(
+        server,
+        name="image_tag",
+        title="Write description, artist or copyright",
+        description=(
+            "Save a NEW copy of an image whose only metadata is the text you give: "
+            "description, artist and/or copyright (EXIF for JPEG/WebP, text chunks for PNG). "
+            "All other source metadata, including GPS location and camera details, is still "
+            "removed. Original never changed. Default name: '<source>-tagged'."
+        ),
+        annotations=_write_hints,
+    )
+    def image_tag(
+        path: SourcePath,
+        description: TagText = None,
+        artist: TagText = None,
+        copyright: TagText = None,  # noqa: A002 - EXIF field name
+        format: OutFormat = None,
+        quality: Quality = DEFAULT_QUALITY,
+        lossless: Lossless = False,
+        output_name: OutputName = None,
+    ) -> TagResult:
+        real = _resolve(path)
+        return TagResult(
+            **_single(
+                "image_tag",
+                ops.tag_image,
+                real,
+                output_name,
+                description=description,
+                artist=artist,
+                copyright=copyright,
+                target=format,
+                quality=quality,
+                lossless=lossless,
+            )
+        )
+
     @_tool(
         server,
         name="image_batch",
@@ -704,7 +1004,7 @@ def build_server(
     )
     async def image_batch(
         operation: Annotated[
-            Literal["convert", "resize", "compress", "rotate_flip", "crop"],
+            Literal["convert", "resize", "compress", "rotate_flip", "crop", "adjust", "watermark"],
             Field(description="Which single-image operation to apply to every file."),
         ],
         ctx: Context,
@@ -746,9 +1046,28 @@ def build_server(
                 description="Write a JSON manifest of the run to the output folder.",
             ),
         ] = True,
+        resume_from: Annotated[
+            str | None,
+            Field(
+                max_length=MAX_STEM_CHARS + 10,
+                description="File name of an earlier manifest in the output folder "
+                "(same operation and options). Files it finished whose source is unchanged "
+                "are reported as 'resumed' and not processed again.",
+            ),
+        ] = None,
+        retries: Annotated[
+            int,
+            Field(
+                ge=0,
+                le=MAX_RETRIES,
+                description="Retry a file this many times after a temporary failure "
+                "(output folder busy, out of memory, unexpected error). Default 0.",
+            ),
+        ] = 0,
     ) -> BatchResult:
         try:
             opts = parse_options(operation, options)
+            previous = load_resume(out, resume_from, operation, opts) if resume_from else {}
             folder_path = root.resolve_dir(folder)
             sel = select_files(
                 folder_path,
@@ -795,10 +1114,43 @@ def build_server(
 
         def process(src):
             src_hash = sha256_file(src)
-            info = run_one(operation, opts, src, out, limits)
+            info = ops.run_one(operation, opts, src, out, limits)
             info["output_sha256"] = sha256_file(info["output_file"])
             info["source_sha256"] = src_hash
             return info
+
+        def output_exists(shown: str) -> bool:
+            # Shown paths are root-relative when the output folder is inside the root,
+            # otherwise a bare name in the output folder (see _display_output).
+            candidate = (root.path / shown) if "/" in shown else (out.path / shown)
+            try:
+                real = candidate.resolve(strict=True)
+            except OSError:
+                return False
+            return real.parent == out.path and real.is_file()
+
+        def already_done(src, rel):
+            prev = previous.get(rel)
+            if not prev or not output_exists(prev["output"]):
+                return None
+            if sha256_file(src) != prev["source_sha256"]:
+                return None
+            return prev
+
+        async def process_with_retries(src):
+            attempt = 0
+            while True:
+                try:
+                    return await anyio.to_thread.run_sync(functools.partial(process, src))
+                except EngineError as err:
+                    if err.code not in RETRYABLE_CODES or attempt >= retries:
+                        raise
+                except Exception:
+                    if attempt >= retries:
+                        raise
+                attempt += 1
+                log.info("image_batch retry %s", attempt)
+                await anyio.sleep(0.2 * attempt)
 
         def record_manifest(status: str):
             if not write_manifest:
@@ -825,8 +1177,17 @@ def build_server(
         try:
             for i, src in enumerate(sel.files):
                 rel = root.display(src)
+                prev = (
+                    await anyio.to_thread.run_sync(functools.partial(already_done, src, rel))
+                    if previous
+                    else None
+                )
+                if prev is not None:
+                    items.append(BatchItem(source=rel, status="resumed", output=prev["output"]))
+                    records.append({**prev, "status": "resumed"})
+                    continue
                 try:
-                    info = await anyio.to_thread.run_sync(functools.partial(process, src))
+                    info = await process_with_retries(src)
                 except EngineError as err:
                     items.append(
                         BatchItem(
@@ -918,6 +1279,7 @@ def build_server(
         result = BatchResult(
             **base,
             succeeded=len(ok),
+            resumed=sum(it.status == "resumed" for it in items),
             failed=sum(it.status == "failed" for it in items),
             not_run=sum(it.status == "not_run" for it in items),
             stopped_reason=stopped,
@@ -937,5 +1299,6 @@ def run_stdio(
     limits: Limits = DEFAULT_LIMITS,
     log_level: str = "WARNING",
     out: OutputDir | None = None,
+    isolate_seconds: float | None = None,
 ) -> None:
-    build_server(root, limits, log_level, out).run("stdio")
+    build_server(root, limits, log_level, out, isolate_seconds).run("stdio")
