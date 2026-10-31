@@ -61,6 +61,14 @@ class InputRoot:
             raise EngineError("invalid_path", f"The path is longer than {MAX_PATH_CHARS} chars.")
 
         candidate = PurePath(user_path)
+        # Check lexical traversal before normpath can erase it from absolute paths.
+        if ".." in candidate.parts:
+            raise EngineError("outside_root", "Paths may not contain '..'.")
+        # Windows rooted-relative (\\photo.png) and drive-relative (C:photo.png)
+        # paths are anchored but not absolute. Joining them can reset the current
+        # drive/folder, so reject them before any filesystem lookup.
+        if candidate.anchor and not candidate.is_absolute():
+            raise EngineError("outside_root", "The path is outside the allowed input folder.")
         if candidate.is_absolute():
             try:
                 candidate = PurePath(os.path.normpath(candidate)).relative_to(self.path)

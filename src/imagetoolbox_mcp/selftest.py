@@ -32,13 +32,17 @@ from typing import TextIO
 from . import __version__
 
 EXPECTED_TOOLS = (
+    "image_adjust",
     "image_batch",
     "image_compress",
     "image_convert",
     "image_crop",
     "image_inspect",
+    "image_recipe",
     "image_resize",
     "image_rotate_flip",
+    "image_tag",
+    "image_watermark",
 )
 
 # Codecs the tools need. JPEG and zlib (PNG) are required; WebP is used by `format: webp`.
@@ -168,6 +172,14 @@ async def _in_process(rep: Report, root: Path, webp: bool) -> None:
             ("image_compress", {"path": "set/photo.jpg", "quality": 60}, lambda d: d["output"]),
             ("image_rotate_flip", {"path": "set/logo.png", "rotate": 90}, lambda d: d["output"]),
             ("image_crop", {"path": "set/photo.jpg", "aspect": "1:1"}, lambda d: d["output"]),
+            ("image_adjust", {"path": "set/photo.jpg", "contrast": 1.2}, lambda d: d["output"]),
+            ("image_watermark", {"path": "set/logo.png", "text": "test"}, lambda d: d["output"]),
+            (
+                "image_recipe",
+                {"path": "set/photo.jpg", "steps": [{"op": "resize", "width": 24}]},
+                lambda d: d["output"],
+            ),
+            ("image_tag", {"path": "set/photo.jpg", "artist": "test"}, lambda d: d["output"]),
             (
                 "image_batch",
                 {"operation": "convert", "options": {"format": "png"}, "folder": "set"},

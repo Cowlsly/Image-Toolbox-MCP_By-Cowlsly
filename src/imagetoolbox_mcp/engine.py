@@ -66,6 +66,11 @@ class Limits:
     max_file_bytes: int = MAX_FILE_BYTES
     max_pixels: int = MAX_PIXELS
     max_search_seconds: float = MAX_SEARCH_SECONDS
+    # Absolute, already-resolved input root. When set (the server always sets it), files
+    # are opened by walking down from this folder one component at a time with
+    # ``O_NOFOLLOW`` (``openat``), so a folder swapped for a symlink after the sandbox check
+    # cannot redirect the read outside the root (threat model R1). POSIX only.
+    confine_to: str | None = None
 
 
 DEFAULT_LIMITS = Limits()
@@ -98,6 +103,50 @@ _OPEN_FLAGS = (
 )
 
 
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+CONFINED_OPEN_SUPPORTED = os.name != "nt" and os.open in os.supports_dir_fd
+
+
+def _open_confined(p: Path, root: str) -> int:
+    """Open ``p`` by walking down from ``root`` with ``dir_fd`` and ``O_NOFOLLOW`` per part.
+
+    Every intermediate component must be a real directory at the moment it is opened, and
+    the final one a non-symlink, so the walk cannot leave ``root`` even if folders are
+    swapped during the call. Falls back to a plain open where ``dir_fd`` is unsupported.
+    """
+    if not CONFINED_OPEN_SUPPORTED:
+        return os.open(p, _OPEN_FLAGS)
+    try:
+        rel = Path(p).relative_to(root)
+    except ValueError:
+        raise EngineError("outside_root", "The path is outside the input folder.") from None
+    parts = rel.parts
+    if not parts or any(part in ("..", ".", "") for part in parts):
+        raise EngineError("invalid_path", "The path is not a file inside the input folder.")
+    dfd = os.open(root, _DIR_FLAGS)
+    try:
+        for part in parts[:-1]:
+            try:
+                nxt = os.open(part, _DIR_FLAGS, dir_fd=dfd)
+            except OSError as exc:
+                # Linux reports a symlinked folder under O_DIRECTORY|O_NOFOLLOW as ENOTDIR.
+                if exc.errno in (errno.ENOTDIR, errno.ELOOP) and _is_link(part, dfd):
+                    raise OSError(errno.ELOOP, "symlink") from None
+                raise
+            os.close(dfd)
+            dfd = nxt
+        return os.open(parts[-1], _OPEN_FLAGS, dir_fd=dfd)
+    finally:
+        os.close(dfd)
+
+
+def _is_link(name: str, dir_fd: int) -> bool:
+    try:
+        return stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+
+
 @contextlib.contextmanager
 def _open(p: Path, limits: Limits = DEFAULT_LIMITS):
     """Open ``p`` race-safely and yield a Pillow image restricted to the allowed decoders.
@@ -108,11 +157,11 @@ def _open(p: Path, limits: Limits = DEFAULT_LIMITS):
     then reads from that descriptor, never from the path.
     """
     try:
-        fd = os.open(p, _OPEN_FLAGS)
+        fd = _open_confined(p, limits.confine_to) if limits.confine_to else os.open(p, _OPEN_FLAGS)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise EngineError("symlink_rejected", "Symbolic links are not accepted.") from None
-        if exc.errno == errno.ENOENT:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
             raise EngineError("not_found", "The image file does not exist.") from None
         raise EngineError("permission_denied", "The image file cannot be read.") from None
     with os.fdopen(fd, "rb") as fh:
@@ -121,8 +170,9 @@ def _open(p: Path, limits: Limits = DEFAULT_LIMITS):
             raise EngineError("not_a_file", "The input is not a regular file.")
         if st.st_size > limits.max_file_bytes:
             raise EngineError("file_too_large", "The file grew past the size limit.")
-        if hasattr(os, "set_blocking"):
-            os.set_blocking(fh.fileno(), True)
+        # Only regular files reach Pillow. O_NONBLOCK has no effect on regular-file
+        # reads on POSIX, and Windows set_blocking accepts pipes only. Calling it
+        # here makes every valid image fail on Windows with a misleading decode error.
         with Image.open(fh, formats=ALLOWED_INPUT_FORMATS) as im:
             yield im
 

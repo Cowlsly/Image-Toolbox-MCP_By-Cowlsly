@@ -2,7 +2,7 @@
 
 Releases are `0.x` alphas until the gates in [roadmap.md](../roadmap.md) §4 M9 pass. Version lives only in `src/imagetoolbox_mcp/__init__.py` (`__version__`); `pyproject.toml` reads it.
 
-Who does what: the agent prepares everything up to "Owner" steps; tags and GitHub releases are made by the owner (the agent's GitHub connector cannot create tags or releases, and `git push` from the agent sandbox is denied).
+Who does what: the agent prepares everything up to "Owner" steps. Since 2026-10-25 the agent can `git push` (including tags); publishing the GitHub release (and deciding *when* a 0.x becomes 1.0) stays with the owner, because it needs the phone self-test first.
 
 ## 1. Before tagging (agent)
 
@@ -31,5 +31,6 @@ Who does what: the agent prepares everything up to "Owner" steps; tags and GitHu
 
 ## Not done yet (tracked in roadmap M9)
 
-- Signed tags, SBOM, reproducible artifacts, PyPI publishing — need CI first (`ci/ci.yml` must be moved to `.github/workflows/` by the owner).
-- CI matrix (Linux/macOS/Windows × Python 3.10–3.13) — defined in `ci/ci.yml`, never run.
+- Signed tags, reproducible release artifacts and PyPI publishing are separate release work; none is certified by a local test pass. An SBOM command exists (`imagetoolbox-mcp --sbom`).
+- CI is live in `.github/workflows/ci.yml`: Ubuntu Python 3.10–3.13 plus Windows/macOS Python 3.13. PR #1's historical Windows failure must be repaired and the new exact head checked. Do not move or duplicate the workflow from the obsolete staged location.
+- Phone self-test and real agent-client evidence remain required before promotion to 1.0.

@@ -6,19 +6,21 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 | Milestone | Status |
 | --- | --- |
-| M0 Foundations | ACTIVE — runtime, packaging, CI workflow, community files done; CI activation BLOCKED (owner must move `ci/ci.yml`); branch rules, secret scanning: owner settings |
+| M0 Foundations | **COMPLETE** (2026-10-25, run 12) — CI live at `.github/workflows/ci.yml`; secret scanning / branch rules are owner settings |
 | M1 Upstream audit | **COMPLETE** (2026-10-17) |
 | M2 Minimal MCP server | **COMPLETE** (2026-10-17, run 3) — `image_inspect` over stdio; output-path item moved to M3 |
 | M3 Core operations | **COMPLETE** (2026-10-17, run 7) — convert + output policy (run 4), resize (run 5), compress (run 6), rotate/flip + crop (run 7) |
-| M4 Batch | **COMPLETE** (2026-10-17, run 9) — `image_batch`, ADR-0004; retries/resume deferred |
-| M7 Client interoperability | ACTIVE — research + ADR-0003 + protocol test done (run 8); real-client evidence = owner's phone (VERIFY) |
-| M6 Threat model | **DONE for local stdio mode** (2026-10-20, run 10) — `docs/threat-model.md`; hard timeout/parser isolation (R2) and independent review open; remote mode needs a new section |
-| M9 Release prep | ACTIVE — run 11: `--self-test`, Termux guide, release checklist, draft v0.8.0 notes; tag/release = owner; dependency review + SBOM next |
-| M5, M8, M10 | PENDING |
+| M4 Batch | **COMPLETE** (2026-10-17, run 9; resume + retries run 12) |
+| M7 Client interoperability | ACTIVE — research, ADR-0003, protocol test, config samples done; real-client evidence = owner's phone (VERIFY) |
+| M6 Threat model | **COMPLETE for local stdio mode** — R1 closed on POSIX, R2 available via `--isolate` (run 12); remote mode needs a new section |
+| M9 Release prep | Agent side **COMPLETE** (run 12: SBOM, dependency review, CI); publishing the release = owner |
+| M5 Android bridge | **CLOSED by decision** (ADR-0006): ship the independent backend |
+| M8 Docs | **COMPLETE** except phone screenshots (need the phone) |
+| M10 Advanced | **COMPLETE** (run 12, ADR-0005) |
 
 **Stack:** Python ≥ 3.10, Pillow, official MCP Python SDK (stdio), `unittest`, `ruff`. See `docs/adr/0001-processing-backend.md`.
 
-**Run:** `imagetoolbox-mcp --root DIR [--out DIR]` (or `IMAGETOOLBOX_MCP_ROOT` / `IMAGETOOLBOX_MCP_OUT`). Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_batch`. Version 0.8.0. Install check: `imagetoolbox-mcp --self-test`. Inputs: JPEG/MPO, PNG, WebP, GIF, TIFF, BMP only.
+**Run:** `imagetoolbox-mcp --root DIR [--out DIR] [--isolate S] [--max-megapixels MP] [--log-format json]`. Tools: `image_inspect`, `image_convert`, `image_resize`, `image_compress`, `image_rotate_flip`, `image_crop`, `image_adjust`, `image_watermark`, `image_recipe`, `image_tag`, `image_batch`. Version 0.9.0. Install check: `imagetoolbox-mcp --self-test`. Inputs: JPEG/MPO, PNG, WebP, GIF, TIFF, BMP only.
 
 **How to test:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` (or `pip install -e .` first) and `ruff check src tests && ruff format --check src tests`.
 
@@ -26,14 +28,40 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 ## Open blockers / VERIFY items
 
-1. **Cloud sandbox has no PyPI/npm access** (egress proxy returns 403 for pypi.org and registry.npmjs.org). Work relies on preinstalled Python 3.13.16, Pillow 12.3.0, mcp 2.3.0 (was 2.2.0 until run 10; sandbox image updated, all tests still pass), pydantic 2.13.5, ruff 0.16.8. Pin versions conservatively; CI on GitHub will install from PyPI.
-2. **`git push` from the sandbox is denied** (repo not in the session's authorised git set). Workaround used: commit via the GitHub connector (`push_files`). Works, but each file's full content must be sent — keep commits small. Owner can fix by adding this repo to the scheduled task's sources.
+1. **Historical environment restriction, superseded for the 1 November worker:** dependency installation succeeded in an isolated Python 3.12.14 environment with Pillow 13.0.0, MCP 2.3.0 and Pydantic 2.14.2. The old no-PyPI limitation remains a historical run-log fact, not a current blocker for this worker.
+2. ~~`git push` denied~~ — resolved 2026-10-25: the repo is attached to the session and `git push` works.
 3. **VERIFY on owner's phone (Termux):** follow `docs/install-termux.md` and run `imagetoolbox-mcp --self-test`. Native deps without Android wheels: `pydantic-core`, `rpds-py` (Rust; may compile 10–30 min), `cryptography` (use Termux `python-cryptography`). Fallback plan in ADR-0001.
-4. **BLOCKED → owner:** CI workflow is staged at `ci/ci.yml`. The GitHub connector returns `403 Resource not accessible by integration` for any commit touching `.github/workflows/` (no `workflows` permission), and `git push` is denied. **Owner fix (phone, 1 min):** open `ci/ci.yml` on github.com → Edit → change the file name/path to `.github/workflows/ci.yml` → delete the 4-line comment header → Commit. Then check the Actions tab for a green run (VERIFY: Actions billing/availability still untested).
+4. **CI is live:** `.github/workflows/ci.yml` ran on PR #1. Retrieved evidence showed Linux/macOS and lint passing, but Windows failed (32 failures, 101 errors, 8 skips). The 1 November repair removes a pipe-only API call from regular-file reads and rejects Windows anchored-relative paths. Native CI must pass on the repair head before integration; local Linux results do not certify Windows.
 5. **Answered (M7, run 8) → owner VERIFY:** phone path = an agent CLI inside Termux (Claude Code via community installer, or Gemini CLI) launching the stdio server — steps in `docs/clients.md`. Claude Android app needs a public OAuth server (deferred, ADR-0003); ChatGPT MCP connectors are web-only.
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-11-01 — portability repair and evidence reconciliation (Marla)
+
+**Objective:** turn the existing 0.9.0 feature PR into a verifiable local image tool without losing its work or weakening the sandbox. Base: PR #1 head `322405bcefc5d6acfcf24ea3f56ef53e1e2ed80c`.
+
+**Research first:** inspected the exact PR, all 76 source files, TODO/roadmap, threat model and Windows CI log. Python documents `os.set_blocking` as pipe-only on Windows and treats rooted-relative/drive-relative paths as anchored but not absolute. Sources and implementation decisions: [maintenance validation](audit/maintenance-validation-2026-11-01.md).
+
+**Implemented:** remove the unnecessary regular-file blocking-mode change; reject anchored-relative Windows paths lexically; reject `..` before normalizing absolute inputs. Decoder allowlist, file-descriptor checks, FIFO refusal and POSIX confined `openat` remain intact. Added a simulated unsupported-blocking regression and Windows lexical-path regression, and expanded the absolute traversal test. All three checks failed on the original code and pass after repair.
+
+**Verified locally:** baseline 232 tests passed on Linux; repaired full suite 234 tests passed, including real stdio MCP and isolation tests. All 24 self-test checks passed. Ruff lint and formatting passed. Native Windows/macOS repair-head CI, installed-wheel validation and phone testing remain separate gates; record their actual outcomes before declaring completion.
+
+**Next:** publish the repair on its own branch into the existing feature branch; inspect native matrix checks, then integrate only exact passing heads. Phone/real-client verification and release publication remain owner steps. No tag, package or release published by this repair.
+
+### 2026-10-25 — run 12 (Claude, owner request: "finish the roadmap")
+
+**Done (v0.9.0)**
+- M10: `edit.py` with `image_adjust`, `image_watermark`, `image_recipe`, `image_tag`; batch ops `adjust`/`watermark`. ADR-0005 (OCR/PDF/HEIC declined for now, AVIF waits for a Termux codec check, no GUI).
+- M4 leftovers: `resume_from` + `retries` in `image_batch`.
+- M6 R2: `isolation.py`, `--isolate SECONDS` (spawned child, hard timeout, crash → `decode_failed`). R1: confined `openat` walk from the root (`Limits.confine_to`, `engine._open_confined`). R3: `--max-megapixels`.
+- M2 logging: `--log-format json`. M9: `sbom.py` / `--sbom`, `docs/dependencies.md`, release notes `docs/releases/v0.9.0.md`.
+- M0: CI moved to `.github/workflows/ci.yml`; `docs/development.md`. M7: `docs/config-samples.md`. M8: `docs/examples.md`, `docs/errors.md`. M5: ADR-0006.
+
+**Tests:** 232 OK (was 195). `ruff check` / `ruff format --check` clean. Wheel installed in a fresh venv: `imagetoolbox-mcp --self-test` → `SELF-TEST PASSED: 24 checks`; `--sbom` → 26 components.
+
+**Next action:** owner phone check (TODO.md "Needs you"), then 1.0.0.
+
 
 ### 2026-10-20 — run 11 (Claude, scheduled)
 

@@ -3,7 +3,8 @@
 import os
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+from unittest import mock
 
 from imagetoolbox_mcp.engine import EngineError
 from imagetoolbox_mcp.sandbox import InputRoot
@@ -47,6 +48,18 @@ class InputRootTests(unittest.TestCase):
         self.assertCode("outside_root", "../secret.png")
         self.assertCode("outside_root", "sub/../a.png")
         self.assertCode("outside_root", str(self.root_dir / ".." / "secret.png"))
+        self.assertCode("outside_root", str(self.root_dir / "sub" / ".." / "a.png"))
+
+    def test_windows_anchored_relative_paths_rejected_before_filesystem_access(self):
+        # Exercise Windows lexical semantics even on a POSIX test runner.
+        for user_path in ("/etc/passwd", r"\photo.png", "C:photo.png"):
+            with self.subTest(user_path=user_path):
+                with (
+                    mock.patch("imagetoolbox_mcp.sandbox.PurePath", PureWindowsPath),
+                    mock.patch("imagetoolbox_mcp.sandbox.os.lstat") as lstat,
+                ):
+                    self.assertCode("outside_root", user_path)
+                    lstat.assert_not_called()
 
     def test_symlink_file_rejected(self):
         os.symlink(self.outside, self.root_dir / "link.png")
