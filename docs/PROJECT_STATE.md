@@ -28,14 +28,26 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 ## Open blockers / VERIFY items
 
-1. **Cloud sandbox has no PyPI/npm access** (egress proxy returns 403 for pypi.org and registry.npmjs.org). Work relies on preinstalled Python 3.13.16, Pillow 12.3.0, mcp 2.3.0 (was 2.2.0 until run 10; sandbox image updated, all tests still pass), pydantic 2.13.5, ruff 0.16.8. Pin versions conservatively; CI on GitHub will install from PyPI.
+1. **Historical environment restriction, superseded for the 1 November worker:** dependency installation succeeded in an isolated Python 3.12.14 environment with Pillow 13.0.0, MCP 2.3.0 and Pydantic 2.14.2. The old no-PyPI limitation remains a historical run-log fact, not a current blocker for this worker.
 2. ~~`git push` denied~~ — resolved 2026-10-25: the repo is attached to the session and `git push` works.
 3. **VERIFY on owner's phone (Termux):** follow `docs/install-termux.md` and run `imagetoolbox-mcp --self-test`. Native deps without Android wheels: `pydantic-core`, `rpds-py` (Rust; may compile 10–30 min), `cryptography` (use Termux `python-cryptography`). Fallback plan in ADR-0001.
-4. **Resolved 2026-10-25 (run 12):** CI workflow moved to `.github/workflows/ci.yml` by `git push`. (Previously staged at `ci/ci.yml`.) The GitHub connector returns `403 Resource not accessible by integration` for any commit touching `.github/workflows/` (no `workflows` permission), and `git push` is denied. **Owner fix (phone, 1 min):** open `ci/ci.yml` on github.com → Edit → change the file name/path to `.github/workflows/ci.yml` → delete the 4-line comment header → Commit. Then check the Actions tab for a green run (VERIFY: Actions billing/availability still untested).
+4. **CI is live:** `.github/workflows/ci.yml` ran on PR #1. Retrieved evidence showed Linux/macOS and lint passing, but Windows failed (32 failures, 101 errors, 8 skips). The 1 November repair removes a pipe-only API call from regular-file reads and rejects Windows anchored-relative paths. Native CI must pass on the repair head before integration; local Linux results do not certify Windows.
 5. **Answered (M7, run 8) → owner VERIFY:** phone path = an agent CLI inside Termux (Claude Code via community installer, or Gemini CLI) launching the stdio server — steps in `docs/clients.md`. Claude Android app needs a public OAuth server (deferred, ADR-0003); ChatGPT MCP connectors are web-only.
 6. **Owner setting:** enable Settings → Code security → Secret scanning + Push protection, and Private vulnerability reporting (SECURITY.md points to it). Optional: branch protection on `root` requiring CI.
 
 ## Run log
+
+### 2026-11-01 — portability repair and evidence reconciliation (Marla)
+
+**Objective:** turn the existing 0.9.0 feature PR into a verifiable local image tool without losing its work or weakening the sandbox. Base: PR #1 head `322405bcefc5d6acfcf24ea3f56ef53e1e2ed80c`.
+
+**Research first:** inspected the exact PR, all 76 source files, TODO/roadmap, threat model and Windows CI log. Python documents `os.set_blocking` as pipe-only on Windows and treats rooted-relative/drive-relative paths as anchored but not absolute. Sources and implementation decisions: [maintenance validation](audit/maintenance-validation-2026-11-01.md).
+
+**Implemented:** remove the unnecessary regular-file blocking-mode change; reject anchored-relative Windows paths lexically; reject `..` before normalizing absolute inputs. Decoder allowlist, file-descriptor checks, FIFO refusal and POSIX confined `openat` remain intact. Added a simulated unsupported-blocking regression and Windows lexical-path regression, and expanded the absolute traversal test. All three checks failed on the original code and pass after repair.
+
+**Verified locally:** baseline 232 tests passed on Linux; repaired full suite 234 tests passed, including real stdio MCP and isolation tests. All 24 self-test checks passed. Ruff lint and formatting passed. Native Windows/macOS repair-head CI, installed-wheel validation and phone testing remain separate gates; record their actual outcomes before declaring completion.
+
+**Next:** publish the repair on its own branch into the existing feature branch; inspect native matrix checks, then integrate only exact passing heads. Phone/real-client verification and release publication remain owner steps. No tag, package or release published by this repair.
 
 ### 2026-10-25 — run 12 (Claude, owner request: "finish the roadmap")
 

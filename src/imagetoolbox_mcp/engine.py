@@ -170,8 +170,9 @@ def _open(p: Path, limits: Limits = DEFAULT_LIMITS):
             raise EngineError("not_a_file", "The input is not a regular file.")
         if st.st_size > limits.max_file_bytes:
             raise EngineError("file_too_large", "The file grew past the size limit.")
-        if hasattr(os, "set_blocking"):
-            os.set_blocking(fh.fileno(), True)
+        # Only regular files reach Pillow. O_NONBLOCK has no effect on regular-file
+        # reads on POSIX, and Windows set_blocking accepts pipes only. Calling it
+        # here makes every valid image fail on Windows with a misleading decode error.
         with Image.open(fh, formats=ALLOWED_INPUT_FORMATS) as im:
             yield im
 

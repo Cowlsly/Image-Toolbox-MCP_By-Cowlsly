@@ -17,6 +17,22 @@ from imagetoolbox_mcp.engine import EngineError, Limits, convert_image, inspect_
 from imagetoolbox_mcp.output import OutputDir
 
 
+class RegularFilePortabilityTests(unittest.TestCase):
+    def test_read_does_not_require_pipe_blocking_api(self):
+        """Windows exposes set_blocking, but only accepts pipe descriptors."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "photo.png"
+            Image.new("RGB", (5, 3), "green").save(source)
+            before = source.read_bytes()
+            with mock.patch.object(
+                engine.os, "set_blocking", side_effect=OSError("regular files unsupported")
+            ) as blocking:
+                result = inspect_image(source)
+            self.assertEqual((result["width"], result["height"]), (5, 3))
+            blocking.assert_not_called()
+            self.assertEqual(source.read_bytes(), before)
+
+
 @unittest.skipIf(os.name == "nt", "POSIX symlink/FIFO semantics")
 class SwapAfterCheckTests(unittest.TestCase):
     def setUp(self):
