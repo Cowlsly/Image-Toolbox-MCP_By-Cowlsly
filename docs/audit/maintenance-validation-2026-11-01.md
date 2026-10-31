@@ -23,3 +23,9 @@ Execution sequence: inspect pinned PR/code/state and CI → research primary doc
 - Environment: Python 3.12.14, Pillow 13.0.0, MCP 2.3.0, Pydantic 2.14.2; isolated virtual environment, generated images only.
 
 Native repair-head CI and built-wheel results must be recorded after they run. A simulated Windows lexical test is not native Windows evidence. The known Windows directory-swap residual in the threat model remains; this repair does not close it. Android/Termux installation, two real client checks and release publication remain separate gates.
+
+## Native-matrix follow-up
+
+The first repair CI run fixed all historical decode/path failures, but exposed 31 Windows test cleanup errors: golden-test helpers registered image closes with `addCleanup`, while `tearDown` deleted the temporary directory first. Windows correctly refused to unlink still-open output files. The [unittest cleanup contract](https://docs.python.org/3.13/library/unittest.html#unittest.TestCase.addCleanup) runs cleanup callbacks after `tearDown`, in LIFO order. Register temporary-directory cleanup first in those four test fixtures; image closes registered later now run before directory deletion. No tests, assertions or Windows matrix jobs are removed.
+
+The wheel built from the repaired production code was installed into a fresh environment and its 24 self-test checks passed from outside the source tree. ResourceWarning-strict Linux tests and dependency consistency checks also passed. The follow-up native Windows run remains a separate check.

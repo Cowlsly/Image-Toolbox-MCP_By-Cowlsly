@@ -8,6 +8,7 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 - Valid image reads no longer call the pipe-only Windows `os.set_blocking` API.
 - Reject Windows rooted-relative and drive-relative input paths before filesystem access.
 - Reject `..` in absolute input paths before normalization can erase the traversal.
+- Close golden-test image handles before temporary directories are removed on Windows.
 - Two regression tests plus an expanded traversal case; 234 tests pass locally on Linux.
 
 ## [0.9.0] - 2026-10-25

@@ -42,13 +42,11 @@ def _noisy(size=(160, 120), mode="RGB", seed=1):
 class CompressTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)  # LIFO: close opened images before deleting files.
         self.base = Path(self._tmp.name).resolve()
         self.src = self.base / "src"
         self.src.mkdir()
         self.out = OutputDir(self.base / "out")
-
-    def tearDown(self):
-        self._tmp.cleanup()
 
     def compress(self, name, stem=None, **kw):
         r = compress_image(self.src / name, self.out, stem, **kw)

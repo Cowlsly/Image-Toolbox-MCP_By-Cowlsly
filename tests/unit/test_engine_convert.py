@@ -24,13 +24,11 @@ def _exif(orientation=None, gps=False):
 class ConvertTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)  # LIFO: close opened images before deleting files.
         self.base = Path(self._tmp.name).resolve()
         self.src = self.base / "src"
         self.src.mkdir()
         self.out = OutputDir(self.base / "out")
-
-    def tearDown(self):
-        self._tmp.cleanup()
 
     def convert(self, name, target, stem="o", **kw):
         r = convert_image(self.src / name, target, self.out, stem, **kw)
