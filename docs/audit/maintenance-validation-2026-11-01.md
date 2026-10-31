@@ -29,3 +29,14 @@ Native repair-head CI and built-wheel results must be recorded after they run. A
 The first repair CI run fixed all historical decode/path failures, but exposed 31 Windows test cleanup errors: golden-test helpers registered image closes with `addCleanup`, while `tearDown` deleted the temporary directory first. Windows correctly refused to unlink still-open output files. The [unittest cleanup contract](https://docs.python.org/3.13/library/unittest.html#unittest.TestCase.addCleanup) runs cleanup callbacks after `tearDown`, in LIFO order. Register temporary-directory cleanup first in those four test fixtures; image closes registered later now run before directory deletion. No tests, assertions or Windows matrix jobs are removed.
 
 The wheel built from the repaired production code was installed into a fresh environment and its 24 self-test checks passed from outside the source tree. ResourceWarning-strict Linux tests and dependency consistency checks also passed. The follow-up native Windows run remains a separate check.
+
+## Completed integration evidence
+
+All seven native matrix/lint checks passed on feature head `4ceaf67328d85aa6282ec2f036dbd79d6d716528`; the integrated root tree matches it exactly. PR #2 repair merge: `4ceaf67328d85aa6282ec2f036dbd79d6d716528`. PR #1 root merge: `bc0e644a370672736559343ac2541e6ca663500f`.
+
+- Native Windows job: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly/actions/runs/41224727062/job/124606397671
+- Ubuntu Python 3.12 job: https://github.com/Cowlsly/Image-Toolbox-MCP_By-Cowlsly/actions/runs/41224727062/job/124606397713
+- The same run passed Ubuntu 3.10, 3.11 and 3.13, macOS 3.13, and lint.
+- Linux full suite passed 234 tests with ResourceWarning treated as an error; all 24 installed-wheel self-test checks passed, including the real stdio child and unchanged-originals check. `pip check` found no broken dependencies.
+
+Remaining gates are explicit: actual Termux/phone installation and self-test, two real agent CLI client checks, owner release publication, and owner-controlled repository security settings. No phone success, tag, release, remote OAuth service or production readiness is claimed.

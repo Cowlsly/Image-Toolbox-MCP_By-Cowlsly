@@ -4,6 +4,8 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 
 ## Current snapshot
 
+**1 November verification:** PR #2's portability repair and PR #1's complete 0.9.0 feature set are merged into `root` at `bc0e644a370672736559343ac2541e6ca663500f`. The integrated file tree was checked against the tested feature head. All seven CI jobs passed on that head: Ubuntu Python 3.10–3.13, macOS/Windows Python 3.13, and lint. Local ResourceWarning-strict suite: 234 tests; fresh installed wheel: 24 self-test checks. This is a release candidate, not a phone-tested or published release.
+
 | Milestone | Status |
 | --- | --- |
 | M0 Foundations | **COMPLETE** (2026-10-25, run 12) — CI live at `.github/workflows/ci.yml`; secret scanning / branch rules are owner settings |
@@ -38,6 +40,8 @@ Newest entry first. Each run: what was done, test evidence, blockers, next actio
 ## Run log
 
 ### 2026-11-01 — portability repair and evidence reconciliation (Marla)
+
+**Final checkpoint:** native matrix passed and both PRs were merged. The initial repair removed every Windows decode/path failure; the follow-up fixed 31 fixture-cleanup errors by closing images before deleting their temporary directories. Evidence and remaining blockers are recorded in the maintenance validation document below. No Windows job or assertion was disabled. Highest-value next action: owner runs the Termux self-test and two real agent-client checks, then decides release publication.
 
 **Objective:** turn the existing 0.9.0 feature PR into a verifiable local image tool without losing its work or weakening the sandbox. Base: PR #1 head `322405bcefc5d6acfcf24ea3f56ef53e1e2ed80c`.
 
