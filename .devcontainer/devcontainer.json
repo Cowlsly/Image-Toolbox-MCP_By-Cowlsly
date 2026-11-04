@@ -1,0 +1,37 @@
+{
+  "name": "Cowlsly Labs • Image-Toolbox-MCP_By-Cowlsly • Mobile",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.fontSize": 18,
+        "terminal.integrated.fontSize": 19,
+        "window.zoomLevel": 0.5,
+        "editor.wordWrap": "on",
+        "editor.minimap.enabled": false,
+        "editor.stickyScroll.enabled": false,
+        "editor.scrollBeyondLastLine": false,
+        "editor.bracketPairColorization.enabled": true,
+        "breadcrumbs.enabled": false,
+        "workbench.startupEditor": "none",
+        "workbench.editor.enablePreview": false,
+        "files.autoSave": "afterDelay",
+        "files.autoSaveDelay": 1800,
+        "terminal.integrated.scrollback": 5000,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "git.autofetch": false,
+        "telemetry.telemetryLevel": "off"
+      },
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  },
+  "postCreateCommand": "git --version && node --version && gh --version"
+}
