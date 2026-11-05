@@ -1,5 +1,5 @@
 {
-  "name": "Cowlsly Labs • Image-Toolbox-MCP_By-Cowlsly • Mobile",
+  "name": "Cowlsly Labs • Image-Toolbox-MCP_By-Cowlsly • Mobile v2",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
@@ -10,8 +10,8 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "editor.fontSize": 18,
-        "terminal.integrated.fontSize": 19,
+        "editor.fontSize": 20,
+        "terminal.integrated.fontSize": 20,
         "window.zoomLevel": 0.5,
         "editor.wordWrap": "on",
         "editor.minimap.enabled": false,
@@ -23,15 +23,22 @@
         "workbench.editor.enablePreview": false,
         "files.autoSave": "afterDelay",
         "files.autoSaveDelay": 1800,
-        "terminal.integrated.scrollback": 5000,
+        "terminal.integrated.scrollback": 8000,
         "terminal.integrated.defaultProfile.linux": "bash",
         "git.autofetch": false,
-        "telemetry.telemetryLevel": "off"
+        "telemetry.telemetryLevel": "off",
+        "terminal.integrated.lineHeight": 1.2,
+        "workbench.editor.showTabs": "single",
+        "workbench.panel.defaultLocation": "bottom",
+        "diffEditor.renderSideBySide": false,
+        "terminal.integrated.tabs.enabled": false,
+        "terminal.integrated.copyOnSelection": false
       },
       "extensions": [
         "ms-python.python"
       ]
     }
   },
-  "postCreateCommand": "git --version && node --version && gh --version"
+  "postCreateCommand": "git --version && node --version && gh --version",
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json"
 }
